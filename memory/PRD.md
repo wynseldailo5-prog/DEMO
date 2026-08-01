@@ -31,12 +31,20 @@ Build a Shopee-style marketplace for farmers (sellers) and buyers within Laguna 
 - Stock decrement on order; stock restore on cancelled/expired online payment. [done]
 - Tested: 24/24 backend pytest pass, all frontend flows pass. [done]
 
+## Implemented (2026-06, iteration 2)
+- Order cancellation (buyer + seller) for unpaid orders via PUT /api/orders/{id}/cancel with automatic stock restore (idempotent). [done]
+- Live delivery map (Leaflet/OpenStreetMap) in buyer order tracking: drop-off pin + rider marker + animated route when out_for_delivery; pickup-location map for pickup orders. [done]
+- Pickup fulfillment option at checkout (delivery vs pickup) — pickup skips address/rider. [done]
+- Seller-driven confirmation: all orders now start 'pending'; seller confirms & advances (delivery: confirmed→packed→rider_assigned→out_for_delivery→delivered; pickup: confirmed→ready_for_pickup→picked_up). [done]
+- Map picker at checkout to drop a delivery pin (lat/lng). [done]
+- Tested: 18/18 backend pytest pass, all frontend flows pass.
+
 ## Backlog / Remaining
-- P1: `/api/orders/{id}/cancel` endpoint for buyers/sellers to cancel unpaid orders.
 - P2: Multi-seller cart split into per-seller sub-orders; tighten CORS for prod; split server.py into routers.
-- P2: Buyer-facing delivery map (lat/lng captured but not visualized).
+- P2: Refunds for paid orders (currently only unpaid orders cancellable).
+- P2: Real-time rider GPS (map currently animates a simulated route).
 
 ## Next Tasks
-- Add order cancellation + refunds.
 - Ratings/reviews for sellers and products.
-- Delivery map view for live tracking.
+- Seller payouts/earnings breakdown view.
+- Refund flow for paid online orders.

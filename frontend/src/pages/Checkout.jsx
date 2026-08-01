@@ -13,7 +13,7 @@ import { toast } from "sonner";
 
 export default function Checkout() {
   const { items, total, clear } = useCart();
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
   const [fulfillment, setFulfillment] = useState("delivery");
   const [method, setMethod] = useState("online");
@@ -24,7 +24,7 @@ export default function Checkout() {
 
   const pickupLocation = items[0]?.location || "Laguna";
 
-  useEffect(() => { if (!user) navigate("/login"); else if (items.length === 0) navigate("/market"); }, [user, items, navigate]);
+  useEffect(() => { if (loading) return; if (!user) navigate("/login"); else if (items.length === 0) navigate("/market"); }, [user, loading, items, navigate]);
 
   const submit = async () => {
     if (!phone.trim()) { toast.error("Please provide a contact phone."); return; }
