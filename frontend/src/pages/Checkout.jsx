@@ -20,7 +20,7 @@ export default function Checkout() {
   const [address, setAddress] = useState(user?.address || "");
   const [phone, setPhone] = useState(user?.phone || "");
   const [pin, setPin] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const pickupLocation = items[0]?.location || "Laguna";
 
@@ -29,7 +29,7 @@ export default function Checkout() {
   const submit = async () => {
     if (!phone.trim()) { toast.error("Please provide a contact phone."); return; }
     if (fulfillment === "delivery" && !address.trim()) { toast.error("Please fill in your delivery address."); return; }
-    setLoading(true);
+    setSubmitting(true);
     try {
       const payload = {
         items: items.map(({ product_id, name, price, quantity, seller_id, image_url }) => ({ product_id, name, price, quantity, seller_id, image_url })),
@@ -51,7 +51,7 @@ export default function Checkout() {
       }
     } catch (err) {
       toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Checkout failed");
-    } finally { setLoading(false); }
+    } finally { setSubmitting(false); }
   };
 
   return (
@@ -129,8 +129,8 @@ export default function Checkout() {
           </div>
           <div className="border-t border-border my-4" />
           <div className="flex justify-between font-heading font-bold text-lg"><span>Total</span><span className="text-primary" data-testid="checkout-total">{peso(total)}</span></div>
-          <Button data-testid="place-order-btn" onClick={submit} disabled={loading} className="w-full mt-5 rounded-full bg-accent hover:bg-accent/90 text-accent-foreground h-12">
-            {loading ? "Processing…" : method === "cod" ? "Place order" : "Pay now"}
+          <Button data-testid="place-order-btn" onClick={submit} disabled={submitting} className="w-full mt-5 rounded-full bg-accent hover:bg-accent/90 text-accent-foreground h-12">
+            {submitting ? "Processing…" : method === "cod" ? "Place order" : "Pay now"}
           </Button>
         </div>
       </div>
