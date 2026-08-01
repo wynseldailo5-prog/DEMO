@@ -9,13 +9,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Plus, Package, Wallet, ShoppingBag, Upload, Trash2, Bike, ImageIcon } from "lucide-react";
+import { Plus, Package, Wallet, ShoppingBag, Upload, Trash2, Bike, ImageIcon, X, Store } from "lucide-react";
 import { toast } from "sonner";
 
 const CATEGORIES = ["Vegetables", "Fruits", "Rice & Grains", "Herbs", "Root Crops", "Dairy & Eggs"];
 const UNITS = ["kg", "piece", "bundle", "sack", "tray", "liter"];
-const NEXT_STATUS = { confirmed: "packed", packed: "rider_assigned", rider_assigned: "out_for_delivery", out_for_delivery: "delivered" };
-const STATUS_LABEL = { pending: "Pending", confirmed: "Confirmed", packed: "Packed", rider_assigned: "Rider Assigned", out_for_delivery: "Out for Delivery", delivered: "Delivered", cancelled: "Cancelled" };
+const NEXT_DELIVERY = { pending: "confirmed", confirmed: "packed", packed: "rider_assigned", rider_assigned: "out_for_delivery", out_for_delivery: "delivered" };
+const NEXT_PICKUP = { pending: "confirmed", confirmed: "ready_for_pickup", ready_for_pickup: "picked_up" };
+const nextStatus = (o) => (o.fulfillment_type === "pickup" ? NEXT_PICKUP : NEXT_DELIVERY)[o.status];
+const STATUS_LABEL = { pending: "Pending", confirmed: "Confirmed", packed: "Packed", rider_assigned: "Rider Assigned", out_for_delivery: "Out for Delivery", delivered: "Delivered", ready_for_pickup: "Ready for Pickup", picked_up: "Picked Up", cancelled: "Cancelled" };
 
 export default function SellerDashboard() {
   const { user, loading } = useAuth();
@@ -67,8 +69,9 @@ export default function SellerDashboard() {
   };
 
   const del = async (id) => { await api.delete(`/products/${id}`); toast.success("Removed"); loadAll(); };
-  const advance = async (o) => { const next = NEXT_STATUS[o.status]; if (!next) return; await api.put(`/orders/${o.id}/status`, { status: next }); toast.success(`Marked ${STATUS_LABEL[next]}`); loadAll(); };
+  const advance = async (o) => { const next = nextStatus(o); if (!next) return; await api.put(`/orders/${o.id}/status`, { status: next }); toast.success(`Marked ${STATUS_LABEL[next]}`); loadAll(); };
   const assignRider = async (orderId, riderId) => { await api.put(`/orders/${orderId}/assign-rider`, { rider_id: riderId }); toast.success("Rider assigned"); loadAll(); };
+  const cancelOrder = async (id) => { try { await api.put(`/orders/${id}/cancel`); toast.success("Cancelled & stock restored"); loadAll(); } catch (err) { toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Cannot cancel"); } };
 
   if (loading || !user) return <div className="py-24 text-center text-muted-foreground">Loading…</div>;
 
@@ -147,23 +150,30 @@ export default function SellerDashboard() {
                 <div key={o.id} data-testid={`seller-order-${o.id}`} className="bg-card border border-border rounded-2xl p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <div className="font-heading font-bold">#{o.id.slice(0, 8)} · {o.buyer_name}</div>
-                      <div className="text-xs text-muted-foreground">{o.items.length} item(s) · {peso(o.total)} · {o.payment_method === "cod" ? "COD" : "Online"} ({o.payment_status})</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">{o.delivery_address} · {o.contact_phone}</div>
+                      <div className="font-heading font-bold flex items-center gap-2">#{o.id.slice(0, 8)} · {o.buyer_name}
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-primary bg-secondary px-2 py-0.5 rounded-full">
+                          {o.fulfillment_type === "pickup" ? <><Store size={11} /> Pickup</> : <><Bike size={11} /> Delivery</>}
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground">{o.items.length} item(s) · {peso(o.total)} · {o.payment_method === "cod" ? "Cash" : "Online"} ({o.payment_status})</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">{o.fulfillment_type === "pickup" ? (o.pickup_location || "Farm pickup") : o.delivery_address} · {o.contact_phone}</div>
                     </div>
-                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${o.status === "delivered" ? "bg-primary/10 text-primary" : "bg-accent/10 text-accent"}`}>{STATUS_LABEL[o.status]}</span>
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${o.status === "delivered" || o.status === "picked_up" ? "bg-primary/10 text-primary" : o.status === "cancelled" ? "bg-destructive/10 text-destructive" : "bg-accent/10 text-accent"}`}>{STATUS_LABEL[o.status]}</span>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 mt-3">
-                    {NEXT_STATUS[o.status] && (
-                      <Button data-testid={`advance-${o.id}`} size="sm" onClick={() => advance(o)} className="rounded-full bg-primary hover:bg-primary/90 text-xs h-8">Mark {STATUS_LABEL[NEXT_STATUS[o.status]]}</Button>
+                    {nextStatus(o) && (
+                      <Button data-testid={`advance-${o.id}`} size="sm" onClick={() => advance(o)} className="rounded-full bg-primary hover:bg-primary/90 text-xs h-8">Mark {STATUS_LABEL[nextStatus(o)]}</Button>
                     )}
-                    {(o.status === "packed" || o.status === "confirmed" || !o.rider) && o.status !== "delivered" && o.status !== "cancelled" && (
+                    {o.fulfillment_type !== "pickup" && !["delivered", "cancelled"].includes(o.status) && (
                       <Select onValueChange={(v) => assignRider(o.id, v)}>
                         <SelectTrigger data-testid={`assign-rider-${o.id}`} className="h-8 w-48 rounded-full text-xs"><Bike size={13} className="mr-1" /><SelectValue placeholder={o.rider ? o.rider.name : "Assign rider"} /></SelectTrigger>
                         <SelectContent>{riders.map((r) => <SelectItem key={r.id} value={r.id}>{r.name} · {r.zone}</SelectItem>)}</SelectContent>
                       </Select>
                     )}
                     {o.rider && <span className="text-xs text-muted-foreground flex items-center gap-1"><Bike size={13} /> {o.rider.name}</span>}
+                    {o.payment_status !== "paid" && !["delivered", "picked_up", "cancelled"].includes(o.status) && (
+                      <button data-testid={`seller-cancel-${o.id}`} onClick={() => cancelOrder(o.id)} className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-destructive hover:underline"><X size={13} /> Cancel</button>
+                    )}
                   </div>
                 </div>
               ))}

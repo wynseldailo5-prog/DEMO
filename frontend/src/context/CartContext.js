@@ -20,7 +20,8 @@ export function CartProvider({ children }) {
       }
       return [...prev, {
         product_id: product.id, name: product.name, price: product.price,
-        quantity: qty, seller_id: product.seller_id, image_url: product.image_url, unit: product.unit,
+        quantity: qty, seller_id: product.seller_id, image_url: product.image_url,
+        unit: product.unit, location: product.location,
       }];
     });
     toast.success(`${product.name} added to cart`);

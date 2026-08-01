@@ -7,33 +7,43 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { CreditCard, Banknote, MapPin } from "lucide-react";
+import MapPicker from "@/components/MapPicker";
+import { CreditCard, Banknote, MapPin, Truck, Store } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Checkout() {
   const { items, total, clear } = useCart();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [fulfillment, setFulfillment] = useState("delivery");
   const [method, setMethod] = useState("online");
   const [address, setAddress] = useState(user?.address || "");
   const [phone, setPhone] = useState(user?.phone || "");
+  const [pin, setPin] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  const pickupLocation = items[0]?.location || "Laguna";
 
   useEffect(() => { if (!user) navigate("/login"); else if (items.length === 0) navigate("/market"); }, [user, items, navigate]);
 
   const submit = async () => {
-    if (!address.trim() || !phone.trim()) { toast.error("Please fill in delivery address and phone."); return; }
+    if (!phone.trim()) { toast.error("Please provide a contact phone."); return; }
+    if (fulfillment === "delivery" && !address.trim()) { toast.error("Please fill in your delivery address."); return; }
     setLoading(true);
     try {
       const payload = {
         items: items.map(({ product_id, name, price, quantity, seller_id, image_url }) => ({ product_id, name, price, quantity, seller_id, image_url })),
-        delivery_address: address, contact_phone: phone, payment_method: method,
+        delivery_address: fulfillment === "delivery" ? address : "",
+        delivery_lat: pin?.lat, delivery_lng: pin?.lng,
+        fulfillment_type: fulfillment,
+        pickup_location: fulfillment === "pickup" ? pickupLocation : null,
+        contact_phone: phone, payment_method: method,
         origin_url: window.location.origin,
       };
       const { data } = await api.post("/checkout", payload);
       if (method === "cod") {
         clear();
-        toast.success("Order placed! Pay on delivery.");
+        toast.success(fulfillment === "pickup" ? "Order placed! Pay when you pick up." : "Order placed! Pay on delivery.");
         navigate("/orders");
       } else {
         localStorage.setItem("pending_order", data.order_id);
@@ -49,19 +59,53 @@ export default function Checkout() {
       <h1 className="font-heading font-black text-3xl tracking-tight mb-6">Checkout</h1>
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
+          {/* Fulfillment */}
           <div className="bg-card border border-border rounded-2xl p-6">
-            <h2 className="font-heading font-bold text-lg flex items-center gap-2"><MapPin size={18} className="text-primary" /> Delivery details</h2>
+            <h2 className="font-heading font-bold text-lg">How do you want it?</h2>
+            <div className="grid sm:grid-cols-2 gap-3 mt-4">
+              {[{ v: "delivery", i: Truck, t: "Deliver to me", d: "A rider brings it to your address" },
+                { v: "pickup", i: Store, t: "Pick up at farm", d: "Best when you're near the farm" }].map((f) => (
+                <button key={f.v} data-testid={`fulfill-${f.v}`} onClick={() => setFulfillment(f.v)}
+                  className={`text-left p-4 rounded-2xl border-2 transition-colors ${fulfillment === f.v ? "border-primary bg-secondary" : "border-border hover:border-primary/40"}`}>
+                  <f.i size={22} className={fulfillment === f.v ? "text-primary" : "text-muted-foreground"} />
+                  <div className="font-semibold mt-2">{f.t}</div>
+                  <div className="text-xs text-muted-foreground">{f.d}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Location details */}
+          <div className="bg-card border border-border rounded-2xl p-6">
+            <h2 className="font-heading font-bold text-lg flex items-center gap-2"><MapPin size={18} className="text-primary" /> {fulfillment === "pickup" ? "Pickup details" : "Delivery details"}</h2>
             <div className="mt-4 space-y-4">
-              <div><Label>Delivery address (Laguna)</Label><Textarea data-testid="address-field" value={address} onChange={(e) => setAddress(e.target.value)} className="mt-1.5" placeholder="House no., Barangay, Municipality, Laguna" /></div>
+              {fulfillment === "delivery" ? (
+                <>
+                  <div><Label>Delivery address (Laguna)</Label><Textarea data-testid="address-field" value={address} onChange={(e) => setAddress(e.target.value)} className="mt-1.5" placeholder="House no., Barangay, Municipality, Laguna" /></div>
+                  <div>
+                    <Label>Pin your location on the map (optional)</Label>
+                    <p className="text-xs text-muted-foreground mb-1.5">Tap the map to drop a pin for the rider.</p>
+                    <MapPicker value={pin} onChange={setPin} />
+                    {pin && <p className="text-xs text-muted-foreground mt-1.5" data-testid="pin-coords">Pinned: {pin.lat}, {pin.lng}</p>}
+                  </div>
+                </>
+              ) : (
+                <div className="rounded-xl bg-secondary/50 p-4 text-sm">
+                  <div className="flex items-center gap-2 font-medium"><Store size={16} className="text-primary" /> Pick up from</div>
+                  <p className="text-muted-foreground mt-1">{pickupLocation}</p>
+                  <p className="text-xs text-muted-foreground mt-2">The seller will notify you once your order is ready for pickup.</p>
+                </div>
+              )}
               <div><Label>Contact phone</Label><Input data-testid="phone-field" value={phone} onChange={(e) => setPhone(e.target.value)} className="mt-1.5" placeholder="0917-xxx-xxxx" /></div>
             </div>
           </div>
 
+          {/* Payment */}
           <div className="bg-card border border-border rounded-2xl p-6">
             <h2 className="font-heading font-bold text-lg">Payment method</h2>
             <div className="grid sm:grid-cols-2 gap-3 mt-4">
               {[{ v: "online", i: CreditCard, t: "Pay online", d: "Card via secure Stripe checkout" },
-                { v: "cod", i: Banknote, t: "Cash on delivery", d: "Pay the rider on arrival" }].map((m) => (
+                { v: "cod", i: Banknote, t: fulfillment === "pickup" ? "Pay on pickup" : "Cash on delivery", d: fulfillment === "pickup" ? "Pay the seller on pickup" : "Pay the rider on arrival" }].map((m) => (
                 <button key={m.v} data-testid={`pay-${m.v}`} onClick={() => setMethod(m.v)}
                   className={`text-left p-4 rounded-2xl border-2 transition-colors ${method === m.v ? "border-primary bg-secondary" : "border-border hover:border-primary/40"}`}>
                   <m.i size={22} className={method === m.v ? "text-primary" : "text-muted-foreground"} />

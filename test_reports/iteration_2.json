@@ -1,0 +1,46 @@
+{
+  "summary": "Iteration 2 e2e testing complete. All 18 pytest backend tests pass (pickup COD checkout, delivery COD starts pending, seller-advance flow, assign-rider only for delivery, pickup advance path confirmed->ready_for_pickup->picked_up, buyer/seller cancel with stock restore, stranger buyer cannot cancel, delivered cannot be cancelled, online Stripe checkout regression, riders have lat/lng). Frontend Playwright verified: checkout fulfillment toggle (delivery vs pickup), MapPicker mounts + Leaflet OSM tiles load (6 tiles) + pin-coords updates on map click, pickup switch hides map+address, pickup+COD order placement, seller dashboard shows Mark Confirmed advance button + Cancel + rider dropdown ONLY for delivery (0 pickup orders showed rider select), seller cancel restores stock with toast. Fixed a real runtime crash in MapPicker/DeliveryMap ('Cannot read properties of undefined (reading _leaflet_pos)') caused by unclaimed setTimeout(invalidateSize, 250) firing after the map is unmounted (e.g., when Checkout auto-redirects on empty cart).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/orders/{id}/cancel", "issue": "Cancelling an order does not decrement seller_stats.revenue in the same request; revenue is recomputed on next GET /api/seller/stats which correctly excludes status=='cancelled'. Acceptable but note that cod_pending revenue is counted before delivery — reconsider whether cancelled COD orders were ever counted (they are excluded by status check, so OK)."},
+      {"endpoint": "CORS", "issue": "allow_origins=['*'] combined with allow_credentials=True is technically invalid per CORS spec; still works via ingress same-origin but flag for prod."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "MapPicker.jsx / DeliveryMap.jsx", "issue": "FIXED by testing agent — unclaimed setTimeout(map.invalidateSize, 250) fired after map.remove() when the component unmounted quickly (e.g., Checkout auto-redirects to /market when cart is empty or /login when unauthenticated). Produced two 'Cannot read properties of undefined (reading _leaflet_pos)' pageerrors shown by the react-error-overlay. Fix: clear the timer and cancelAnimationFrame in cleanup, wrapped invalidateSize in try/catch.", "selector": "[data-testid=\"map-picker\"], [data-testid=\"delivery-map\"]", "priority": "HIGH"},
+      {"component": "Checkout.jsx (pre-existing)", "issue": "useEffect runs `if (!user) navigate('/login')` immediately on mount without waiting for AuthContext.loading. On a hard-refresh or page.goto('/checkout'), user is null on the first tick before /api/auth/me resolves, so authenticated users are incorrectly bounced to /login. Same pattern in SellerDashboard.jsx BUT it guards with `if (loading) return;` — Checkout should follow the same pattern.", "selector": "N/A", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Checkout.jsx should also gate the redirect on `!loading && !user` (mirror SellerDashboard.jsx pattern) so refreshing /checkout does not bounce authenticated users to /login. Cart.jsx checkout link masks this in normal flow, but /checkout is a valid direct route.",
+    "Consider making the MapPicker/DeliveryMap fix in-code (testing agent already applied it) — kept the invalidateSize try/catch + clearTimeout safety net."
+  ],
+  "critical_code_review_comments": [
+    "MapPicker/DeliveryMap useEffect had a setTimeout for map.invalidateSize() but no clearTimeout on unmount. Any React strict-mode double-effect or route change during mount would crash Leaflet internals. Fixed.",
+    "server.py: single file (~501 lines) still fine for MVP but auth/products/orders/payments should be split into routers before further growth. Iteration 2 added ~50 lines (cancel endpoint + fulfillment fields).",
+    "server.py cancel_order permission check uses `uid in o.get('seller_ids', [])` — correct for multi-seller carts.",
+    "restore_stock() correctly guards with `stock_restored` flag so double-cancel or stripe-expired-then-cancel won't double-refund stock.",
+    "Frontend uses Leaflet via CDN in public/index.html (window.L). If the CDN is unreachable, DeliveryMap/MapPicker silently early-return (`if (!window.L) return`) — leaves an empty div. Consider a fallback message.",
+    "Checkout.jsx pickup path uses `items[0]?.location` as pickupLocation — for multi-seller carts this only shows the first item's farm. Acceptable for MVP since typically single farm per order."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py",
+    "/app/frontend/src/components/MapPicker.jsx",
+    "/app/frontend/src/components/DeliveryMap.jsx"
+  ],
+  "success_rate": {"backend": "100% (18/18)", "frontend": "100% of tested flows after map fix"},
+  "test_credentials": "Seller mang.kanor@laguna.ph/farmer123, Buyer aling.nena@laguna.ph/buyer123, Admin wynseldailo5@gmail.com/AdminLaguna123 — all working.",
+  "seed_data_creation": "Backend tests created TEST_ prefixed users and multiple TEST_Iter2 products and orders (pickup COD, delivery COD, cancelled orders). UI test placed one additional pickup COD order and then cancelled it. No cleanup performed (no admin DELETE endpoints).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression suite covering iteration 2 lives in /app/backend/tests/backend_test.py (18 tests). Run with `REACT_APP_BACKEND_URL=<url> python -m pytest backend/tests/backend_test.py -n 0`. IMPORTANT: server.py conftest / test file reads REACT_APP_BACKEND_URL from env (no default) — must be exported or run from a shell that has it. Two files were modified by this agent (MapPicker.jsx, DeliveryMap.jsx) to clear setTimeout on unmount. Checkout.jsx still has a minor UX bug (redirects to /login on hard reload before auth hydration) — pre-existing, not iteration-2-specific.",
+  "rca of the issue": "MapPicker/DeliveryMap crash RCA: In their useEffect, after map init they queue `setTimeout(() => map.invalidateSize(), 250)` to fix Leaflet sizing after DOM paint. Cleanup only called `map.remove()`. When the checkout page rendered MapPicker but immediately redirected (empty cart → /market), the timer fired ~250ms later against a torn-down Leaflet map whose internal _mapPane was undefined, throwing 'Cannot read properties of undefined (reading _leaflet_pos)'. Fix: capture the timer id in the useEffect and clear it in cleanup, plus wrap invalidateSize in try/catch."
+}

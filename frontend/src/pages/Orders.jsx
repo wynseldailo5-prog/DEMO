@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import api, { fileUrl, peso } from "@/lib/api";
+import api, { fileUrl, peso, formatApiErrorDetail } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import OrderTracker from "@/components/OrderTracker";
-import { Package, MapPin, Phone, Bike, ChevronDown } from "lucide-react";
+import DeliveryMap from "@/components/DeliveryMap";
+import { Package, MapPin, Phone, Bike, ChevronDown, Store, X } from "lucide-react";
+import { toast } from "sonner";
 
 const FALLBACK = "https://images.unsplash.com/photo-1687199129802-3e4cc27baac0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwxfHxmcmVzaCUyMHZlZ2V0YWJsZXMlMjBtYXJrZXQlMjBzdGFsbHxlbnwwfHx8fDE3ODU1NTQzMDd8MA&ixlib=rb-4.1.0&q=85";
-
-const STATUS_LABEL = { pending: "Pending", confirmed: "Confirmed", packed: "Packed", rider_assigned: "Rider Assigned", out_for_delivery: "Out for Delivery", delivered: "Delivered", cancelled: "Cancelled" };
+const STATUS_LABEL = { pending: "Pending", confirmed: "Confirmed", packed: "Packed", rider_assigned: "Rider Assigned", out_for_delivery: "Out for Delivery", delivered: "Delivered", ready_for_pickup: "Ready for Pickup", picked_up: "Picked Up", cancelled: "Cancelled" };
 
 export default function Orders() {
   const { user } = useAuth();
@@ -15,7 +16,15 @@ export default function Orders() {
   const [open, setOpen] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { if (user) api.get("/orders").then((r) => setOrders(r.data)).finally(() => setLoading(false)); }, [user]);
+  const load = () => api.get("/orders").then((r) => setOrders(r.data)).finally(() => setLoading(false));
+  useEffect(() => { if (user) load(); }, [user]);
+
+  const cancel = async (id) => {
+    try { await api.put(`/orders/${id}/cancel`); toast.success("Order cancelled & stock restored"); load(); }
+    catch (err) { toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Cannot cancel"); }
+  };
+
+  const canCancel = (o) => o.payment_status !== "paid" && !["delivered", "picked_up", "cancelled"].includes(o.status);
 
   if (!user) return <div className="max-w-3xl mx-auto px-4 py-24 text-center"><p className="text-muted-foreground">Please <Link to="/login" className="text-primary font-semibold">sign in</Link> to view orders.</p></div>;
   if (loading) return <div className="max-w-3xl mx-auto px-4 py-24 text-center text-muted-foreground">Loading orders…</div>;
@@ -31,21 +40,29 @@ export default function Orders() {
             <div key={o.id} data-testid={`order-${o.id}`} className="bg-card border border-border rounded-2xl overflow-hidden">
               <button onClick={() => setOpen(open === o.id ? null : o.id)} className="w-full flex items-center justify-between p-4 hover:bg-secondary/40 transition-colors">
                 <div className="flex items-center gap-3 text-left">
-                  <span className="grid place-items-center h-10 w-10 rounded-xl bg-secondary text-primary"><Package size={18} /></span>
+                  <span className="grid place-items-center h-10 w-10 rounded-xl bg-secondary text-primary">{o.fulfillment_type === "pickup" ? <Store size={18} /> : <Package size={18} />}</span>
                   <div>
                     <div className="font-heading font-bold">Order #{o.id.slice(0, 8)}</div>
                     <div className="text-xs text-muted-foreground">{new Date(o.created_at).toLocaleDateString()} · {o.items.length} item(s) · {peso(o.total)}</div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${o.status === "delivered" ? "bg-primary/10 text-primary" : o.status === "cancelled" ? "bg-destructive/10 text-destructive" : "bg-accent/10 text-accent"}`}>{STATUS_LABEL[o.status]}</span>
+                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${o.status === "delivered" || o.status === "picked_up" ? "bg-primary/10 text-primary" : o.status === "cancelled" ? "bg-destructive/10 text-destructive" : "bg-accent/10 text-accent"}`}>{STATUS_LABEL[o.status]}</span>
                   <ChevronDown size={18} className={`transition-transform ${open === o.id ? "rotate-180" : ""}`} />
                 </div>
               </button>
 
               {open === o.id && (
                 <div className="p-4 border-t border-border space-y-5">
-                  <div className="pt-3"><OrderTracker status={o.status} /></div>
+                  <div className="pt-3"><OrderTracker status={o.status} fulfillment_type={o.fulfillment_type} /></div>
+
+                  {o.status !== "cancelled" && (
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">{o.fulfillment_type === "pickup" ? "Pickup location" : "Live delivery map"}</div>
+                      <DeliveryMap order={o} />
+                    </div>
+                  )}
+
                   <div className="space-y-2">
                     {o.items.map((i, idx) => (
                       <div key={idx} className="flex items-center gap-3">
@@ -56,11 +73,19 @@ export default function Orders() {
                     ))}
                   </div>
                   <div className="grid sm:grid-cols-2 gap-3 text-sm bg-secondary/40 rounded-xl p-4">
-                    <div className="flex items-start gap-2"><MapPin size={15} className="mt-0.5 text-primary" /><span>{o.delivery_address}</span></div>
+                    {o.fulfillment_type === "pickup"
+                      ? <div className="flex items-start gap-2"><Store size={15} className="mt-0.5 text-primary" /><span>{o.pickup_location || "Farm pickup"}</span></div>
+                      : <div className="flex items-start gap-2"><MapPin size={15} className="mt-0.5 text-primary" /><span>{o.delivery_address}</span></div>}
                     <div className="flex items-center gap-2"><Phone size={15} className="text-primary" /><span>{o.contact_phone}</span></div>
-                    <div className="flex items-center gap-2"><span className="text-muted-foreground">Payment:</span><span className="font-medium">{o.payment_method === "cod" ? "Cash on Delivery" : "Online"} · {o.payment_status}</span></div>
+                    <div className="flex items-center gap-2"><span className="text-muted-foreground">Payment:</span><span className="font-medium">{o.payment_method === "cod" ? "Cash" : "Online"} · {o.payment_status}</span></div>
                     {o.rider && <div className="flex items-center gap-2"><Bike size={15} className="text-primary" /><span>{o.rider.name} · {o.rider.phone}</span></div>}
                   </div>
+
+                  {canCancel(o) && (
+                    <button data-testid={`cancel-order-${o.id}`} onClick={() => cancel(o.id)} className="inline-flex items-center gap-1.5 text-sm font-medium text-destructive hover:underline">
+                      <X size={15} /> Cancel order
+                    </button>
+                  )}
                 </div>
               )}
             </div>

@@ -1,22 +1,32 @@
-import { Check, Package, ShoppingBag, Bike, Truck, Home } from "lucide-react";
+import { Check, Package, ShoppingBag, Bike, Truck, Home, Store, PackageCheck } from "lucide-react";
 
-const STAGES = [
+const DELIVERY_STAGES = [
   { key: "confirmed", label: "Confirmed", icon: ShoppingBag },
   { key: "packed", label: "Packed", icon: Package },
   { key: "rider_assigned", label: "Rider Assigned", icon: Bike },
   { key: "out_for_delivery", label: "Out for Delivery", icon: Truck },
   { key: "delivered", label: "Delivered", icon: Home },
 ];
+const PICKUP_STAGES = [
+  { key: "confirmed", label: "Confirmed", icon: ShoppingBag },
+  { key: "ready_for_pickup", label: "Ready for Pickup", icon: Store },
+  { key: "picked_up", label: "Picked Up", icon: PackageCheck },
+];
 
-export default function OrderTracker({ status }) {
+const DELIVERY_ORDER = ["pending", "confirmed", "packed", "rider_assigned", "out_for_delivery", "delivered"];
+const PICKUP_ORDER = ["pending", "confirmed", "ready_for_pickup", "picked_up"];
+
+export default function OrderTracker({ status, fulfillment_type = "delivery" }) {
   if (status === "cancelled") {
-    return <div className="text-sm font-medium text-destructive">This order was cancelled.</div>;
+    return <div className="text-sm font-medium text-destructive" data-testid="order-tracker">This order was cancelled.</div>;
   }
-  const order = ["pending", "confirmed", "packed", "rider_assigned", "out_for_delivery", "delivered"];
+  const isPickup = fulfillment_type === "pickup";
+  const stages = isPickup ? PICKUP_STAGES : DELIVERY_STAGES;
+  const order = isPickup ? PICKUP_ORDER : DELIVERY_ORDER;
   const current = order.indexOf(status);
   return (
     <div className="flex items-center justify-between" data-testid="order-tracker">
-      {STAGES.map((s, i) => {
+      {stages.map((s, i) => {
         const stageIdx = order.indexOf(s.key);
         const done = current >= stageIdx;
         const Icon = s.icon;

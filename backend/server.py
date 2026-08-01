@@ -135,11 +135,13 @@ class OrderItem(BaseModel):
 
 class CheckoutInput(BaseModel):
     items: List[OrderItem]
-    delivery_address: str
+    delivery_address: str = ""
     delivery_lat: Optional[float] = None
     delivery_lng: Optional[float] = None
     contact_phone: str
     payment_method: str  # "online" or "cod"
+    fulfillment_type: str = "delivery"  # "delivery" or "pickup"
+    pickup_location: Optional[str] = None
     origin_url: str
 
 class StatusUpdate(BaseModel):
@@ -148,7 +150,7 @@ class StatusUpdate(BaseModel):
 class RiderAssign(BaseModel):
     rider_id: str
 
-ORDER_STAGES = ["pending", "confirmed", "packed", "rider_assigned", "out_for_delivery", "delivered", "cancelled"]
+ORDER_STAGES = ["pending", "confirmed", "packed", "rider_assigned", "out_for_delivery", "delivered", "ready_for_pickup", "picked_up", "cancelled"]
 
 # ----------------------- Auth routes -----------------------
 @api_router.post("/auth/register")
@@ -285,6 +287,7 @@ async def checkout(data: CheckoutInput, request: Request, user: dict = Depends(g
     order = {"id": order_id, "buyer_id": str(user["_id"]), "buyer_name": user.get("name"),
              "items": items, "total": total, "delivery_address": data.delivery_address,
              "delivery_lat": data.delivery_lat, "delivery_lng": data.delivery_lng,
+             "fulfillment_type": data.fulfillment_type, "pickup_location": data.pickup_location,
              "contact_phone": data.contact_phone, "payment_method": data.payment_method,
              "payment_status": "pending", "status": "pending", "rider": None,
              "seller_ids": list({i["seller_id"] for i in items}),
@@ -296,8 +299,6 @@ async def checkout(data: CheckoutInput, request: Request, user: dict = Depends(g
 
     if data.payment_method == "cod":
         order["payment_status"] = "cod_pending"
-        order["status"] = "confirmed"
-        order["history"].append({"status": "confirmed", "at": now})
         await db.orders.insert_one(dict(order))
         return {"order_id": order_id, "payment_method": "cod"}
 
@@ -336,8 +337,7 @@ async def payment_status(session_id: str, request: Request):
                     {"$set": {"status": "completed", "payment_status": "paid", "updated_at": now}})
                 await db.orders.update_one(
                     {"id": record["order_id"], "payment_status": {"$ne": "paid"}},
-                    {"$set": {"payment_status": "paid", "status": "confirmed", "updated_at": now},
-                     "$push": {"history": {"status": "confirmed", "at": now}}})
+                    {"$set": {"payment_status": "paid", "updated_at": now}})
                 record = await db.payment_transactions.find_one({"session_id": session_id})
             elif status.status == "expired":
                 order = await db.orders.find_one({"id": record["order_id"]})
@@ -367,8 +367,7 @@ async def stripe_webhook(request: Request):
         if rec:
             await db.orders.update_one(
                 {"id": rec["order_id"], "payment_status": {"$ne": "paid"}},
-                {"$set": {"payment_status": "paid", "status": "confirmed", "updated_at": now},
-                 "$push": {"history": {"status": "confirmed", "at": now}}})
+                {"$set": {"payment_status": "paid", "updated_at": now}})
     elif wh.payment_status in ("expired", "failed", "unpaid"):
         rec = await db.payment_transactions.find_one({"session_id": wh.session_id})
         if rec:
@@ -422,6 +421,27 @@ async def assign_rider(order_id: str, data: RiderAssign, user: dict = Depends(re
          "$push": {"history": {"status": "rider_assigned", "at": now}}})
     return await db.orders.find_one({"id": order_id}, {"_id": 0})
 
+@api_router.put("/orders/{order_id}/cancel")
+async def cancel_order(order_id: str, user: dict = Depends(get_current_user)):
+    o = await db.orders.find_one({"id": order_id})
+    if not o:
+        raise HTTPException(status_code=404, detail="Order not found")
+    uid = str(user["_id"])
+    is_owner = o["buyer_id"] == uid
+    is_seller = user.get("role") in ("seller", "admin") and (uid in o.get("seller_ids", []) or user.get("role") == "admin")
+    if not (is_owner or is_seller):
+        raise HTTPException(status_code=403, detail="Not allowed to cancel this order")
+    if o.get("payment_status") == "paid":
+        raise HTTPException(status_code=400, detail="Paid orders cannot be cancelled. Please request a refund instead.")
+    if o.get("status") in ("delivered", "picked_up", "cancelled"):
+        raise HTTPException(status_code=400, detail="This order can no longer be cancelled")
+    now = datetime.now(timezone.utc).isoformat()
+    await restore_stock(o)
+    await db.orders.update_one({"id": order_id},
+        {"$set": {"status": "cancelled", "updated_at": now},
+         "$push": {"history": {"status": "cancelled", "at": now}}})
+    return await db.orders.find_one({"id": order_id}, {"_id": 0})
+
 @api_router.get("/seller/stats")
 async def seller_stats(user: dict = Depends(require_seller)):
     uid = str(user["_id"])
@@ -459,12 +479,17 @@ async def startup():
                                    "created_at": datetime.now(timezone.utc).isoformat()})
     if await db.riders.count_documents({}) == 0:
         riders = [
-            {"id": str(uuid.uuid4()), "name": "Jun Dela Cruz", "phone": "0917-555-1010", "vehicle": "Motorcycle", "zone": "Calamba"},
-            {"id": str(uuid.uuid4()), "name": "Marvin Reyes", "phone": "0917-555-2020", "vehicle": "Tricycle", "zone": "Los Baños"},
-            {"id": str(uuid.uuid4()), "name": "Ella Santos", "phone": "0917-555-3030", "vehicle": "Motorcycle", "zone": "Santa Cruz"},
-            {"id": str(uuid.uuid4()), "name": "Boy Aquino", "phone": "0917-555-4040", "vehicle": "Multicab", "zone": "San Pablo"},
+            {"id": str(uuid.uuid4()), "name": "Jun Dela Cruz", "phone": "0917-555-1010", "vehicle": "Motorcycle", "zone": "Calamba", "lat": 14.2117, "lng": 121.1653},
+            {"id": str(uuid.uuid4()), "name": "Marvin Reyes", "phone": "0917-555-2020", "vehicle": "Tricycle", "zone": "Los Baños", "lat": 14.1699, "lng": 121.2415},
+            {"id": str(uuid.uuid4()), "name": "Ella Santos", "phone": "0917-555-3030", "vehicle": "Motorcycle", "zone": "Santa Cruz", "lat": 14.2813, "lng": 121.4162},
+            {"id": str(uuid.uuid4()), "name": "Boy Aquino", "phone": "0917-555-4040", "vehicle": "Multicab", "zone": "San Pablo", "lat": 14.0683, "lng": 121.3256},
         ]
         await db.riders.insert_many(riders)
+    else:
+        zone_coords = {"Calamba": (14.2117, 121.1653), "Los Baños": (14.1699, 121.2415),
+                       "Santa Cruz": (14.2813, 121.4162), "San Pablo": (14.0683, 121.3256)}
+        for zone, (lat, lng) in zone_coords.items():
+            await db.riders.update_one({"zone": zone, "lat": {"$exists": False}}, {"$set": {"lat": lat, "lng": lng}})
     try:
         init_storage()
     except Exception as e:
