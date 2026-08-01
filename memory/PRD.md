@@ -48,3 +48,11 @@ Build a Shopee-style marketplace for farmers (sellers) and buyers within Laguna 
 - Ratings/reviews for sellers and products.
 - Seller payouts/earnings breakdown view.
 - Refund flow for paid online orders.
+
+## Implemented (2026-06, iteration 3 — GCash)
+- GCash manual payment: sellers save GCash name/number + optional uploaded GCash QR (PUT /api/seller/gcash). [done]
+- Buyer GCash checkout: 3rd payment option → dedicated /gcash-pay/:orderId page showing seller QR (uploaded or server-generated PNG via GET /api/gcash-qr/{id}), number/name with copy, and reference submission (PUT /api/orders/{id}/gcash-reference → gcash_submitted). [done]
+- Seller confirms receipt (PUT /api/orders/{id}/verify-payment → paid); reference shown on seller order card. [done]
+- Fixed checkout post-submit navigation race (placed useRef guard) affecting COD + GCash. [done]
+- Tested: full GCash lifecycle passes end-to-end via UI (iteration_5, 100%).
+- NOTE: This is a direct peer-to-peer GCash transfer flow (no gateway). True automated account-linking/charging would require a licensed provider (PayMongo/Xendit) + the seller's merchant KYC and API keys.
