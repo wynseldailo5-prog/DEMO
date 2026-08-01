@@ -267,6 +267,13 @@ async def list_riders():
 def order_total(items):
     return round(sum(i["price"] * i["quantity"] for i in items), 2)
 
+async def restore_stock(order):
+    if order.get("stock_restored"):
+        return
+    for i in order.get("items", []):
+        await db.products.update_one({"id": i["product_id"]}, {"$inc": {"stock": i["quantity"]}})
+    await db.orders.update_one({"id": order["id"]}, {"$set": {"stock_restored": True}})
+
 @api_router.post("/checkout")
 async def checkout(data: CheckoutInput, request: Request, user: dict = Depends(get_current_user)):
     if not data.items:
@@ -332,6 +339,10 @@ async def payment_status(session_id: str, request: Request):
                     {"$set": {"payment_status": "paid", "status": "confirmed", "updated_at": now},
                      "$push": {"history": {"status": "confirmed", "at": now}}})
                 record = await db.payment_transactions.find_one({"session_id": session_id})
+            elif status.status == "expired":
+                order = await db.orders.find_one({"id": record["order_id"]})
+                if order:
+                    await restore_stock(order)
         except Exception as e:
             logger.error(f"stripe status err: {e}")
     return {"session_id": session_id, "status": record["status"], "payment_status": record["payment_status"], "order_id": record.get("order_id")}
@@ -358,6 +369,12 @@ async def stripe_webhook(request: Request):
                 {"id": rec["order_id"], "payment_status": {"$ne": "paid"}},
                 {"$set": {"payment_status": "paid", "status": "confirmed", "updated_at": now},
                  "$push": {"history": {"status": "confirmed", "at": now}}})
+    elif wh.payment_status in ("expired", "failed", "unpaid"):
+        rec = await db.payment_transactions.find_one({"session_id": wh.session_id})
+        if rec:
+            order = await db.orders.find_one({"id": rec["order_id"]})
+            if order and order.get("payment_status") != "paid":
+                await restore_stock(order)
     return {"status": "ok"}
 
 @api_router.get("/orders")
