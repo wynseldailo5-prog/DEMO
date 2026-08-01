@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Plus, Package, Wallet, ShoppingBag, Upload, Trash2, Bike, ImageIcon, X, Store, Copy } from "lucide-react";
@@ -126,7 +126,7 @@ export default function SellerDashboard() {
             <Button data-testid="gcash-settings-btn" variant="outline" className="rounded-full gap-2 border-[#0079FF]/40 text-[#0079FF] hover:bg-[#0079FF]/10"><Wallet size={18} /> GCash{user.gcash_number ? "" : " setup"}</Button>
           </DialogTrigger>
           <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-            <DialogHeader><DialogTitle className="font-heading flex items-center gap-2"><Wallet size={18} className="text-[#0079FF]" /> Receive payments via GCash</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle className="font-heading flex items-center gap-2"><Wallet size={18} className="text-[#0079FF]" /> Receive payments via GCash</DialogTitle><DialogDescription>Enter your GCash details so buyers can pay you directly.</DialogDescription></DialogHeader>
             <div className="space-y-4 mt-2">
               <p className="text-sm text-muted-foreground">Buyers will pay directly to your GCash. Enter your details and upload your GCash QR (from your GCash app → “Show QR”).</p>
               <div><Label>GCash account name</Label><Input data-testid="gcash-name-input" value={gcash.gcash_name} onChange={(e) => setGcash({ ...gcash, gcash_name: e.target.value })} className="mt-1.5" placeholder="Juan D." /></div>

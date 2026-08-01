@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import api, { peso, formatApiErrorDetail } from "@/lib/api";
 import { useCart } from "@/context/CartContext";
@@ -21,10 +21,11 @@ export default function Checkout() {
   const [phone, setPhone] = useState(user?.phone || "");
   const [pin, setPin] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const placed = useRef(false);
 
   const pickupLocation = items[0]?.location || "Laguna";
 
-  useEffect(() => { if (loading) return; if (!user) navigate("/login"); else if (items.length === 0) navigate("/market"); }, [user, loading, items, navigate]);
+  useEffect(() => { if (loading || placed.current) return; if (!user) navigate("/login"); else if (items.length === 0) navigate("/market"); }, [user, loading, items, navigate]);
 
   const submit = async () => {
     if (!phone.trim()) { toast.error("Please provide a contact phone."); return; }
@@ -41,6 +42,7 @@ export default function Checkout() {
         origin_url: window.location.origin,
       };
       const { data } = await api.post("/checkout", payload);
+      placed.current = true;
       if (method === "cod") {
         clear();
         toast.success(fulfillment === "pickup" ? "Order placed! Pay when you pick up." : "Order placed! Pay on delivery.");
