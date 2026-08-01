@@ -1,0 +1,193 @@
+import { useEffect, useState, useRef } from "react";
+import { useNavigate } from "react-router-dom";
+import api, { fileUrl, peso, formatApiErrorDetail } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Plus, Package, Wallet, ShoppingBag, Upload, Trash2, Bike, ImageIcon } from "lucide-react";
+import { toast } from "sonner";
+
+const CATEGORIES = ["Vegetables", "Fruits", "Rice & Grains", "Herbs", "Root Crops", "Dairy & Eggs"];
+const UNITS = ["kg", "piece", "bundle", "sack", "tray", "liter"];
+const NEXT_STATUS = { confirmed: "packed", packed: "rider_assigned", rider_assigned: "out_for_delivery", out_for_delivery: "delivered" };
+const STATUS_LABEL = { pending: "Pending", confirmed: "Confirmed", packed: "Packed", rider_assigned: "Rider Assigned", out_for_delivery: "Out for Delivery", delivered: "Delivered", cancelled: "Cancelled" };
+
+export default function SellerDashboard() {
+  const { user, loading } = useAuth();
+  const navigate = useNavigate();
+  const [stats, setStats] = useState({ products: 0, orders: 0, revenue: 0 });
+  const [products, setProducts] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [riders, setRiders] = useState([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [form, setForm] = useState({ name: "", description: "", category: "Vegetables", price: "", unit: "kg", stock: "", location: "Laguna", image_url: null });
+  const fileRef = useRef();
+
+  const loadAll = async () => {
+    const [s, p, o, r] = await Promise.all([
+      api.get("/seller/stats"), api.get("/products", { params: { seller_id: user.id } }), api.get("/orders"), api.get("/riders"),
+    ]);
+    setStats(s.data); setProducts(p.data); setOrders(o.data); setRiders(r.data);
+  };
+
+  useEffect(() => {
+    if (loading) return;
+    if (!user || (user.role !== "seller" && user.role !== "admin")) { navigate("/"); return; }
+    loadAll(); /* eslint-disable-next-line */
+  }, [user, loading]);
+
+  const upload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const fd = new FormData(); fd.append("file", file);
+      const { data } = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      setForm((f) => ({ ...f, image_url: data.image_url }));
+      toast.success("Image uploaded");
+    } catch (err) { toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Upload failed"); }
+    finally { setUploading(false); }
+  };
+
+  const createProduct = async () => {
+    if (!form.name || !form.price) { toast.error("Name and price are required"); return; }
+    try {
+      await api.post("/products", { ...form, price: parseFloat(form.price), stock: parseInt(form.stock || 0) });
+      toast.success("Product posted!");
+      setDialogOpen(false);
+      setForm({ name: "", description: "", category: "Vegetables", price: "", unit: "kg", stock: "", location: "Laguna", image_url: null });
+      loadAll();
+    } catch (err) { toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed"); }
+  };
+
+  const del = async (id) => { await api.delete(`/products/${id}`); toast.success("Removed"); loadAll(); };
+  const advance = async (o) => { const next = NEXT_STATUS[o.status]; if (!next) return; await api.put(`/orders/${o.id}/status`, { status: next }); toast.success(`Marked ${STATUS_LABEL[next]}`); loadAll(); };
+  const assignRider = async (orderId, riderId) => { await api.put(`/orders/${orderId}/assign-rider`, { rider_id: riderId }); toast.success("Rider assigned"); loadAll(); };
+
+  if (loading || !user) return <div className="py-24 text-center text-muted-foreground">Loading…</div>;
+
+  const STAT_CARDS = [
+    { icon: Package, label: "Products", value: stats.products },
+    { icon: ShoppingBag, label: "Orders", value: stats.orders },
+    { icon: Wallet, label: "Revenue", value: peso(stats.revenue) },
+  ];
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="font-heading font-black text-3xl tracking-tight">Farm Dashboard</h1>
+          <p className="text-sm text-muted-foreground mt-1">{user.farm_name || user.name}</p>
+        </div>
+        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <DialogTrigger asChild>
+            <Button data-testid="new-product-btn" className="rounded-full bg-accent hover:bg-accent/90 text-accent-foreground gap-2"><Plus size={18} /> Post goods</Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader><DialogTitle className="font-heading">Post your goods</DialogTitle></DialogHeader>
+            <div className="space-y-4 mt-2">
+              <div>
+                <Label>Product photo</Label>
+                <input ref={fileRef} type="file" accept="image/*" hidden onChange={upload} data-testid="image-upload-input" />
+                <button type="button" onClick={() => fileRef.current?.click()} className="mt-1.5 w-full aspect-video rounded-xl border-2 border-dashed border-border grid place-items-center overflow-hidden hover:border-primary/50 transition-colors">
+                  {form.image_url ? <img src={fileUrl(form.image_url)} alt="preview" className="h-full w-full object-cover" /> :
+                    <div className="text-center text-muted-foreground"><ImageIcon className="mx-auto mb-1" /><span className="text-sm">{uploading ? "Uploading…" : "Click to upload"}</span></div>}
+                </button>
+              </div>
+              <div><Label>Name</Label><Input data-testid="product-name-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="mt-1.5" placeholder="e.g. Fresh Tomatoes" /></div>
+              <div><Label>Description</Label><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="mt-1.5" placeholder="Freshly harvested…" /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Category</Label>
+                  <Select value={form.category} onValueChange={(v) => setForm({ ...form, category: v })}>
+                    <SelectTrigger data-testid="category-select" className="mt-1.5"><SelectValue /></SelectTrigger>
+                    <SelectContent>{CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div><Label>Unit</Label>
+                  <Select value={form.unit} onValueChange={(v) => setForm({ ...form, unit: v })}>
+                    <SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
+                    <SelectContent>{UNITS.map((u) => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><Label>Price (₱)</Label><Input data-testid="product-price-input" type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} className="mt-1.5" placeholder="0.00" /></div>
+                <div><Label>Stock</Label><Input data-testid="product-stock-input" type="number" value={form.stock} onChange={(e) => setForm({ ...form, stock: e.target.value })} className="mt-1.5" placeholder="0" /></div>
+              </div>
+              <div><Label>Location</Label><Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} className="mt-1.5" placeholder="Municipality, Laguna" /></div>
+              <Button data-testid="save-product-btn" onClick={createProduct} className="w-full rounded-full bg-primary hover:bg-primary/90">Post product</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      <div className="grid grid-cols-3 gap-4 mb-8">
+        {STAT_CARDS.map((s) => (
+          <div key={s.label} className="bg-card border border-border rounded-2xl p-5">
+            <s.icon className="text-primary" size={22} />
+            <div className="font-heading font-black text-2xl mt-2" data-testid={`stat-${s.label.toLowerCase()}`}>{s.value}</div>
+            <div className="text-xs text-muted-foreground uppercase tracking-wider">{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      <Tabs defaultValue="orders">
+        <TabsList className="mb-4"><TabsTrigger value="orders" data-testid="tab-orders">Incoming Orders</TabsTrigger><TabsTrigger value="products" data-testid="tab-products">My Products</TabsTrigger></TabsList>
+
+        <TabsContent value="orders">
+          {orders.length === 0 ? <p className="text-muted-foreground text-center py-12">No orders yet.</p> : (
+            <div className="space-y-3">
+              {orders.map((o) => (
+                <div key={o.id} data-testid={`seller-order-${o.id}`} className="bg-card border border-border rounded-2xl p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="font-heading font-bold">#{o.id.slice(0, 8)} · {o.buyer_name}</div>
+                      <div className="text-xs text-muted-foreground">{o.items.length} item(s) · {peso(o.total)} · {o.payment_method === "cod" ? "COD" : "Online"} ({o.payment_status})</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">{o.delivery_address} · {o.contact_phone}</div>
+                    </div>
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${o.status === "delivered" ? "bg-primary/10 text-primary" : "bg-accent/10 text-accent"}`}>{STATUS_LABEL[o.status]}</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 mt-3">
+                    {NEXT_STATUS[o.status] && (
+                      <Button data-testid={`advance-${o.id}`} size="sm" onClick={() => advance(o)} className="rounded-full bg-primary hover:bg-primary/90 text-xs h-8">Mark {STATUS_LABEL[NEXT_STATUS[o.status]]}</Button>
+                    )}
+                    {(o.status === "packed" || o.status === "confirmed" || !o.rider) && o.status !== "delivered" && o.status !== "cancelled" && (
+                      <Select onValueChange={(v) => assignRider(o.id, v)}>
+                        <SelectTrigger data-testid={`assign-rider-${o.id}`} className="h-8 w-48 rounded-full text-xs"><Bike size={13} className="mr-1" /><SelectValue placeholder={o.rider ? o.rider.name : "Assign rider"} /></SelectTrigger>
+                        <SelectContent>{riders.map((r) => <SelectItem key={r.id} value={r.id}>{r.name} · {r.zone}</SelectItem>)}</SelectContent>
+                      </Select>
+                    )}
+                    {o.rider && <span className="text-xs text-muted-foreground flex items-center gap-1"><Bike size={13} /> {o.rider.name}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="products">
+          {products.length === 0 ? <p className="text-muted-foreground text-center py-12">No products yet. Post your first harvest!</p> : (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {products.map((p) => (
+                <div key={p.id} data-testid={`seller-product-${p.id}`} className="bg-card border border-border rounded-2xl overflow-hidden">
+                  <div className="aspect-[4/3] bg-muted"><img src={fileUrl(p.image_url) || "https://images.unsplash.com/photo-1687199129802-3e4cc27baac0?w=400"} alt={p.name} className="h-full w-full object-cover" /></div>
+                  <div className="p-3">
+                    <div className="font-heading font-bold text-sm line-clamp-1">{p.name}</div>
+                    <div className="text-xs text-muted-foreground">{peso(p.price)}/{p.unit} · {p.stock} left</div>
+                    <button data-testid={`delete-product-${p.id}`} onClick={() => del(p.id)} className="mt-2 text-xs text-destructive flex items-center gap-1 hover:underline"><Trash2 size={12} /> Remove</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}

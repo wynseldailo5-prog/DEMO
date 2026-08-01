@@ -1,0 +1,95 @@
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import api, { peso, formatApiErrorDetail } from "@/lib/api";
+import { useCart } from "@/context/CartContext";
+import { useAuth } from "@/context/AuthContext";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { CreditCard, Banknote, MapPin } from "lucide-react";
+import { toast } from "sonner";
+
+export default function Checkout() {
+  const { items, total, clear } = useCart();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const [method, setMethod] = useState("online");
+  const [address, setAddress] = useState(user?.address || "");
+  const [phone, setPhone] = useState(user?.phone || "");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => { if (!user) navigate("/login"); else if (items.length === 0) navigate("/market"); }, [user, items, navigate]);
+
+  const submit = async () => {
+    if (!address.trim() || !phone.trim()) { toast.error("Please fill in delivery address and phone."); return; }
+    setLoading(true);
+    try {
+      const payload = {
+        items: items.map(({ product_id, name, price, quantity, seller_id, image_url }) => ({ product_id, name, price, quantity, seller_id, image_url })),
+        delivery_address: address, contact_phone: phone, payment_method: method,
+        origin_url: window.location.origin,
+      };
+      const { data } = await api.post("/checkout", payload);
+      if (method === "cod") {
+        clear();
+        toast.success("Order placed! Pay on delivery.");
+        navigate("/orders");
+      } else {
+        localStorage.setItem("pending_order", data.order_id);
+        window.location.href = data.checkout_url;
+      }
+    } catch (err) {
+      toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Checkout failed");
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
+      <h1 className="font-heading font-black text-3xl tracking-tight mb-6">Checkout</h1>
+      <div className="grid lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          <div className="bg-card border border-border rounded-2xl p-6">
+            <h2 className="font-heading font-bold text-lg flex items-center gap-2"><MapPin size={18} className="text-primary" /> Delivery details</h2>
+            <div className="mt-4 space-y-4">
+              <div><Label>Delivery address (Laguna)</Label><Textarea data-testid="address-field" value={address} onChange={(e) => setAddress(e.target.value)} className="mt-1.5" placeholder="House no., Barangay, Municipality, Laguna" /></div>
+              <div><Label>Contact phone</Label><Input data-testid="phone-field" value={phone} onChange={(e) => setPhone(e.target.value)} className="mt-1.5" placeholder="0917-xxx-xxxx" /></div>
+            </div>
+          </div>
+
+          <div className="bg-card border border-border rounded-2xl p-6">
+            <h2 className="font-heading font-bold text-lg">Payment method</h2>
+            <div className="grid sm:grid-cols-2 gap-3 mt-4">
+              {[{ v: "online", i: CreditCard, t: "Pay online", d: "Card via secure Stripe checkout" },
+                { v: "cod", i: Banknote, t: "Cash on delivery", d: "Pay the rider on arrival" }].map((m) => (
+                <button key={m.v} data-testid={`pay-${m.v}`} onClick={() => setMethod(m.v)}
+                  className={`text-left p-4 rounded-2xl border-2 transition-colors ${method === m.v ? "border-primary bg-secondary" : "border-border hover:border-primary/40"}`}>
+                  <m.i size={22} className={method === m.v ? "text-primary" : "text-muted-foreground"} />
+                  <div className="font-semibold mt-2">{m.t}</div>
+                  <div className="text-xs text-muted-foreground">{m.d}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-card border border-border rounded-2xl p-6 h-fit">
+          <h2 className="font-heading font-bold text-lg">Order</h2>
+          <div className="mt-4 space-y-2 max-h-52 overflow-y-auto">
+            {items.map((i) => (
+              <div key={i.product_id} className="flex justify-between text-sm">
+                <span className="text-muted-foreground truncate pr-2">{i.name} ×{i.quantity}</span>
+                <span className="font-medium whitespace-nowrap">{peso(i.price * i.quantity)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="border-t border-border my-4" />
+          <div className="flex justify-between font-heading font-bold text-lg"><span>Total</span><span className="text-primary" data-testid="checkout-total">{peso(total)}</span></div>
+          <Button data-testid="place-order-btn" onClick={submit} disabled={loading} className="w-full mt-5 rounded-full bg-accent hover:bg-accent/90 text-accent-foreground h-12">
+            {loading ? "Processing…" : method === "cod" ? "Place order" : "Pay now"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
