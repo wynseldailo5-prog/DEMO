@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import MapPicker from "@/components/MapPicker";
-import { CreditCard, Banknote, MapPin, Truck, Store } from "lucide-react";
+import { CreditCard, Banknote, MapPin, Truck, Store, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Checkout() {
@@ -45,6 +45,10 @@ export default function Checkout() {
         clear();
         toast.success(fulfillment === "pickup" ? "Order placed! Pay when you pick up." : "Order placed! Pay on delivery.");
         navigate("/orders");
+      } else if (method === "gcash") {
+        clear();
+        toast.success("Order placed! Complete your GCash payment.");
+        navigate(`/gcash-pay/${data.order_id}`);
       } else {
         localStorage.setItem("pending_order", data.order_id);
         window.location.href = data.checkout_url;
@@ -103,8 +107,9 @@ export default function Checkout() {
           {/* Payment */}
           <div className="bg-card border border-border rounded-2xl p-6">
             <h2 className="font-heading font-bold text-lg">Payment method</h2>
-            <div className="grid sm:grid-cols-2 gap-3 mt-4">
+            <div className="grid sm:grid-cols-3 gap-3 mt-4">
               {[{ v: "online", i: CreditCard, t: "Pay online", d: "Card via secure Stripe checkout" },
+                { v: "gcash", i: Wallet, t: "GCash", d: "Scan QR or send to the seller's GCash" },
                 { v: "cod", i: Banknote, t: fulfillment === "pickup" ? "Pay on pickup" : "Cash on delivery", d: fulfillment === "pickup" ? "Pay the seller on pickup" : "Pay the rider on arrival" }].map((m) => (
                 <button key={m.v} data-testid={`pay-${m.v}`} onClick={() => setMethod(m.v)}
                   className={`text-left p-4 rounded-2xl border-2 transition-colors ${method === m.v ? "border-primary bg-secondary" : "border-border hover:border-primary/40"}`}>

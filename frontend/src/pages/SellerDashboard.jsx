@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Plus, Package, Wallet, ShoppingBag, Upload, Trash2, Bike, ImageIcon, X, Store } from "lucide-react";
+import { Plus, Package, Wallet, ShoppingBag, Upload, Trash2, Bike, ImageIcon, X, Store, Copy } from "lucide-react";
 import { toast } from "sonner";
 
 const CATEGORIES = ["Vegetables", "Fruits", "Rice & Grains", "Herbs", "Root Crops", "Dairy & Eggs"];
@@ -20,16 +20,24 @@ const nextStatus = (o) => (o.fulfillment_type === "pickup" ? NEXT_PICKUP : NEXT_
 const STATUS_LABEL = { pending: "Pending", confirmed: "Confirmed", packed: "Packed", rider_assigned: "Rider Assigned", out_for_delivery: "Out for Delivery", delivered: "Delivered", ready_for_pickup: "Ready for Pickup", picked_up: "Picked Up", cancelled: "Cancelled" };
 
 export default function SellerDashboard() {
-  const { user, loading } = useAuth();
+  const { user, loading, setUser } = useAuth();
   const navigate = useNavigate();
   const [stats, setStats] = useState({ products: 0, orders: 0, revenue: 0 });
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [riders, setRiders] = useState([]);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [gcashOpen, setGcashOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [gcashUploading, setGcashUploading] = useState(false);
+  const [gcash, setGcash] = useState({ gcash_number: "", gcash_name: "", gcash_qr_url: null });
   const [form, setForm] = useState({ name: "", description: "", category: "Vegetables", price: "", unit: "kg", stock: "", location: "Laguna", image_url: null });
   const fileRef = useRef();
+  const qrRef = useRef();
+
+  useEffect(() => {
+    if (user) setGcash({ gcash_number: user.gcash_number || "", gcash_name: user.gcash_name || "", gcash_qr_url: user.gcash_qr_url || null });
+  }, [user]);
 
   const loadAll = async () => {
     const [s, p, o, r] = await Promise.all([
@@ -72,6 +80,30 @@ export default function SellerDashboard() {
   const advance = async (o) => { const next = nextStatus(o); if (!next) return; await api.put(`/orders/${o.id}/status`, { status: next }); toast.success(`Marked ${STATUS_LABEL[next]}`); loadAll(); };
   const assignRider = async (orderId, riderId) => { await api.put(`/orders/${orderId}/assign-rider`, { rider_id: riderId }); toast.success("Rider assigned"); loadAll(); };
   const cancelOrder = async (id) => { try { await api.put(`/orders/${id}/cancel`); toast.success("Cancelled & stock restored"); loadAll(); } catch (err) { toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Cannot cancel"); } };
+  const verifyPayment = async (id) => { await api.put(`/orders/${id}/verify-payment`); toast.success("Payment confirmed"); loadAll(); };
+
+  const uploadQr = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setGcashUploading(true);
+    try {
+      const fd = new FormData(); fd.append("file", file);
+      const { data } = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      setGcash((g) => ({ ...g, gcash_qr_url: data.image_url }));
+      toast.success("QR uploaded");
+    } catch (err) { toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Upload failed"); }
+    finally { setGcashUploading(false); }
+  };
+
+  const saveGcash = async () => {
+    if (!gcash.gcash_number || !gcash.gcash_name) { toast.error("GCash name and number are required"); return; }
+    try {
+      const { data } = await api.put("/seller/gcash", gcash);
+      setUser(data);
+      toast.success("GCash details saved");
+      setGcashOpen(false);
+    } catch (err) { toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to save"); }
+  };
 
   if (loading || !user) return <div className="py-24 text-center text-muted-foreground">Loading…</div>;
 
@@ -88,6 +120,29 @@ export default function SellerDashboard() {
           <h1 className="font-heading font-black text-3xl tracking-tight">Farm Dashboard</h1>
           <p className="text-sm text-muted-foreground mt-1">{user.farm_name || user.name}</p>
         </div>
+        <div className="flex items-center gap-2">
+        <Dialog open={gcashOpen} onOpenChange={setGcashOpen}>
+          <DialogTrigger asChild>
+            <Button data-testid="gcash-settings-btn" variant="outline" className="rounded-full gap-2 border-[#0079FF]/40 text-[#0079FF] hover:bg-[#0079FF]/10"><Wallet size={18} /> GCash{user.gcash_number ? "" : " setup"}</Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+            <DialogHeader><DialogTitle className="font-heading flex items-center gap-2"><Wallet size={18} className="text-[#0079FF]" /> Receive payments via GCash</DialogTitle></DialogHeader>
+            <div className="space-y-4 mt-2">
+              <p className="text-sm text-muted-foreground">Buyers will pay directly to your GCash. Enter your details and upload your GCash QR (from your GCash app → “Show QR”).</p>
+              <div><Label>GCash account name</Label><Input data-testid="gcash-name-input" value={gcash.gcash_name} onChange={(e) => setGcash({ ...gcash, gcash_name: e.target.value })} className="mt-1.5" placeholder="Juan D." /></div>
+              <div><Label>GCash number</Label><Input data-testid="gcash-number-input" value={gcash.gcash_number} onChange={(e) => setGcash({ ...gcash, gcash_number: e.target.value })} className="mt-1.5" placeholder="0917-xxx-xxxx" /></div>
+              <div>
+                <Label>Your GCash QR (optional)</Label>
+                <input ref={qrRef} type="file" accept="image/*" hidden onChange={uploadQr} data-testid="gcash-qr-input" />
+                <button type="button" onClick={() => qrRef.current?.click()} className="mt-1.5 w-full aspect-video rounded-xl border-2 border-dashed border-border grid place-items-center overflow-hidden hover:border-[#0079FF]/50 transition-colors">
+                  {gcash.gcash_qr_url ? <img src={fileUrl(gcash.gcash_qr_url)} alt="qr" className="h-full w-full object-contain p-2" /> :
+                    <div className="text-center text-muted-foreground"><ImageIcon className="mx-auto mb-1" /><span className="text-sm">{gcashUploading ? "Uploading…" : "Upload GCash QR"}</span></div>}
+                </button>
+              </div>
+              <Button data-testid="save-gcash-btn" onClick={saveGcash} className="w-full rounded-full bg-[#0079FF] hover:bg-[#0079FF]/90 text-white">Save GCash details</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
             <Button data-testid="new-product-btn" className="rounded-full bg-accent hover:bg-accent/90 text-accent-foreground gap-2"><Plus size={18} /> Post goods</Button>
@@ -128,6 +183,7 @@ export default function SellerDashboard() {
             </div>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-4 mb-8">
@@ -155,8 +211,11 @@ export default function SellerDashboard() {
                           {o.fulfillment_type === "pickup" ? <><Store size={11} /> Pickup</> : <><Bike size={11} /> Delivery</>}
                         </span>
                       </div>
-                      <div className="text-xs text-muted-foreground">{o.items.length} item(s) · {peso(o.total)} · {o.payment_method === "cod" ? "Cash" : "Online"} ({o.payment_status})</div>
+                      <div className="text-xs text-muted-foreground">{o.items.length} item(s) · {peso(o.total)} · {o.payment_method === "cod" ? "Cash" : o.payment_method === "gcash" ? "GCash" : "Online"} ({o.payment_status})</div>
                       <div className="text-xs text-muted-foreground mt-0.5">{o.fulfillment_type === "pickup" ? (o.pickup_location || "Farm pickup") : o.delivery_address} · {o.contact_phone}</div>
+                      {o.payment_method === "gcash" && o.gcash_reference && (
+                        <div className="text-xs mt-1 inline-flex items-center gap-1 text-[#0079FF] font-medium" data-testid={`gcash-ref-${o.id}`}>GCash Ref: {o.gcash_reference}</div>
+                      )}
                     </div>
                     <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${o.status === "delivered" || o.status === "picked_up" ? "bg-primary/10 text-primary" : o.status === "cancelled" ? "bg-destructive/10 text-destructive" : "bg-accent/10 text-accent"}`}>{STATUS_LABEL[o.status]}</span>
                   </div>
@@ -171,6 +230,11 @@ export default function SellerDashboard() {
                       </Select>
                     )}
                     {o.rider && <span className="text-xs text-muted-foreground flex items-center gap-1"><Bike size={13} /> {o.rider.name}</span>}
+                    {o.payment_method === "gcash" && o.payment_status !== "paid" && (
+                      <Button data-testid={`verify-payment-${o.id}`} size="sm" onClick={() => verifyPayment(o.id)} className="rounded-full bg-[#0079FF] hover:bg-[#0079FF]/90 text-white text-xs h-8">
+                        {o.payment_status === "gcash_submitted" ? "Confirm payment received" : "Mark GCash paid"}
+                      </Button>
+                    )}
                     {o.payment_status !== "paid" && !["delivered", "picked_up", "cancelled"].includes(o.status) && (
                       <button data-testid={`seller-cancel-${o.id}`} onClick={() => cancelOrder(o.id)} className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-destructive hover:underline"><X size={13} /> Cancel</button>
                     )}

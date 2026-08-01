@@ -11,6 +11,7 @@ import ProductDetail from "@/pages/ProductDetail";
 import Cart from "@/pages/Cart";
 import Checkout from "@/pages/Checkout";
 import PaymentResult from "@/pages/PaymentResult";
+import GcashPayment from "@/pages/GcashPayment";
 import Orders from "@/pages/Orders";
 import SellerDashboard from "@/pages/SellerDashboard";
 
@@ -31,6 +32,7 @@ function App() {
               <Route path="/checkout" element={<Checkout />} />
               <Route path="/payment/success" element={<PaymentResult />} />
               <Route path="/payment/cancel" element={<PaymentResult cancel />} />
+              <Route path="/gcash-pay/:orderId" element={<GcashPayment />} />
               <Route path="/orders" element={<Orders />} />
               <Route path="/seller" element={<SellerDashboard />} />
             </Routes>

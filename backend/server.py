@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
-import logging, uuid, bcrypt, jwt, requests
+import logging, uuid, bcrypt, jwt, requests, io, qrcode
 
 from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
 
@@ -75,7 +75,9 @@ def create_access_token(user_id: str, email: str) -> str:
 def serialize_user(user: dict) -> dict:
     return {"id": str(user["_id"]), "email": user["email"], "name": user.get("name"),
             "role": user.get("role"), "phone": user.get("phone"), "address": user.get("address"),
-            "farm_name": user.get("farm_name")}
+            "farm_name": user.get("farm_name"),
+            "gcash_number": user.get("gcash_number"), "gcash_name": user.get("gcash_name"),
+            "gcash_qr_url": user.get("gcash_qr_url")}
 
 async def get_current_user(request: Request) -> dict:
     token = request.cookies.get("access_token")
@@ -149,6 +151,15 @@ class StatusUpdate(BaseModel):
 
 class RiderAssign(BaseModel):
     rider_id: str
+
+class GcashProfile(BaseModel):
+    gcash_number: str
+    gcash_name: str
+    gcash_qr_url: Optional[str] = None
+
+class GcashReference(BaseModel):
+    reference: str
+    proof_url: Optional[str] = None
 
 ORDER_STAGES = ["pending", "confirmed", "packed", "rider_assigned", "out_for_delivery", "delivered", "ready_for_pickup", "picked_up", "cancelled"]
 
@@ -302,6 +313,18 @@ async def checkout(data: CheckoutInput, request: Request, user: dict = Depends(g
         await db.orders.insert_one(dict(order))
         return {"order_id": order_id, "payment_method": "cod"}
 
+    if data.payment_method == "gcash":
+        seller_id = items[0]["seller_id"]
+        seller = await db.users.find_one({"_id": ObjectId(seller_id)})
+        if not seller or not seller.get("gcash_number"):
+            for i in items:  # rollback stock
+                await db.products.update_one({"id": i["product_id"]}, {"$inc": {"stock": i["quantity"]}})
+            raise HTTPException(status_code=400, detail="This seller hasn't set up GCash yet. Please pick another payment method.")
+        order["payment_status"] = "gcash_pending"
+        order["gcash_info"] = {"number": seller.get("gcash_number"), "name": seller.get("gcash_name"), "qr_url": seller.get("gcash_qr_url")}
+        await db.orders.insert_one(dict(order))
+        return {"order_id": order_id, "payment_method": "gcash"}
+
     # online payment
     host_url = str(request.base_url)
     webhook_url = f"{host_url}api/webhook/stripe"
@@ -441,6 +464,49 @@ async def cancel_order(order_id: str, user: dict = Depends(get_current_user)):
         {"$set": {"status": "cancelled", "updated_at": now},
          "$push": {"history": {"status": "cancelled", "at": now}}})
     return await db.orders.find_one({"id": order_id}, {"_id": 0})
+
+@api_router.put("/seller/gcash")
+async def update_gcash(data: GcashProfile, user: dict = Depends(require_seller)):
+    await db.users.update_one({"_id": user["_id"]},
+        {"$set": {"gcash_number": data.gcash_number, "gcash_name": data.gcash_name, "gcash_qr_url": data.gcash_qr_url}})
+    u = await db.users.find_one({"_id": user["_id"]})
+    return serialize_user(u)
+
+@api_router.put("/orders/{order_id}/gcash-reference")
+async def submit_gcash_ref(order_id: str, data: GcashReference, user: dict = Depends(get_current_user)):
+    o = await db.orders.find_one({"id": order_id})
+    if not o:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if o["buyer_id"] != str(user["_id"]):
+        raise HTTPException(status_code=403, detail="Not your order")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.orders.update_one({"id": order_id},
+        {"$set": {"gcash_reference": data.reference, "gcash_proof_url": data.proof_url,
+                  "payment_status": "gcash_submitted", "updated_at": now}})
+    return await db.orders.find_one({"id": order_id}, {"_id": 0})
+
+@api_router.put("/orders/{order_id}/verify-payment")
+async def verify_payment(order_id: str, user: dict = Depends(require_seller)):
+    o = await db.orders.find_one({"id": order_id})
+    if not o:
+        raise HTTPException(status_code=404, detail="Order not found")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.orders.update_one({"id": order_id},
+        {"$set": {"payment_status": "paid", "updated_at": now}})
+    return await db.orders.find_one({"id": order_id}, {"_id": 0})
+
+@api_router.get("/gcash-qr/{order_id}")
+async def gcash_qr(order_id: str):
+    o = await db.orders.find_one({"id": order_id})
+    if not o or not o.get("gcash_info"):
+        raise HTTPException(status_code=404, detail="No GCash info for this order")
+    info = o["gcash_info"]
+    payload = f"GCash Payment\nPay to: {info.get('name')}\nNumber: {info.get('number')}\nAmount: PHP {o['total']:.2f}\nRef: {order_id[:8]}"
+    img = qrcode.make(payload)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return StarletteResponse(content=buf.getvalue(), media_type="image/png")
 
 @api_router.get("/seller/stats")
 async def seller_stats(user: dict = Depends(require_seller)):

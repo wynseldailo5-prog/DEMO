@@ -4,7 +4,7 @@ import api, { fileUrl, peso, formatApiErrorDetail } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import OrderTracker from "@/components/OrderTracker";
 import DeliveryMap from "@/components/DeliveryMap";
-import { Package, MapPin, Phone, Bike, ChevronDown, Store, X } from "lucide-react";
+import { Package, MapPin, Phone, Bike, ChevronDown, Store, X, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 const FALLBACK = "https://images.unsplash.com/photo-1687199129802-3e4cc27baac0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwxfHxmcmVzaCUyMHZlZ2V0YWJsZXMlMjBtYXJrZXQlMjBzdGFsbHxlbnwwfHx8fDE3ODU1NTQzMDd8MA&ixlib=rb-4.1.0&q=85";
@@ -77,9 +77,15 @@ export default function Orders() {
                       ? <div className="flex items-start gap-2"><Store size={15} className="mt-0.5 text-primary" /><span>{o.pickup_location || "Farm pickup"}</span></div>
                       : <div className="flex items-start gap-2"><MapPin size={15} className="mt-0.5 text-primary" /><span>{o.delivery_address}</span></div>}
                     <div className="flex items-center gap-2"><Phone size={15} className="text-primary" /><span>{o.contact_phone}</span></div>
-                    <div className="flex items-center gap-2"><span className="text-muted-foreground">Payment:</span><span className="font-medium">{o.payment_method === "cod" ? "Cash" : "Online"} · {o.payment_status}</span></div>
+                    <div className="flex items-center gap-2"><span className="text-muted-foreground">Payment:</span><span className="font-medium">{o.payment_method === "cod" ? "Cash" : o.payment_method === "gcash" ? "GCash" : "Online"} · {o.payment_status}</span></div>
                     {o.rider && <div className="flex items-center gap-2"><Bike size={15} className="text-primary" /><span>{o.rider.name} · {o.rider.phone}</span></div>}
                   </div>
+
+                  {o.payment_method === "gcash" && o.payment_status !== "paid" && (
+                    <Link to={`/gcash-pay/${o.id}`} data-testid={`gcash-pay-link-${o.id}`} className="inline-flex items-center gap-1.5 text-sm font-medium text-[#0079FF] hover:underline">
+                      <Wallet size={15} /> {o.payment_status === "gcash_submitted" ? "View GCash payment (awaiting seller)" : "Complete GCash payment"}
+                    </Link>
+                  )}
 
                   {canCancel(o) && (
                     <button data-testid={`cancel-order-${o.id}`} onClick={() => cancel(o.id)} className="inline-flex items-center gap-1.5 text-sm font-medium text-destructive hover:underline">
