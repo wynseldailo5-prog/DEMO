@@ -22,10 +22,23 @@ export default function Checkout() {
   const [pin, setPin] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const placed = useRef(false);
+  const [shippingFee, setShippingFee] = useState(0);
 
   const pickupLocation = items[0]?.location || "Laguna";
 
   useEffect(() => { if (loading || placed.current) return; if (!user) navigate("/login"); else if (items.length === 0) navigate("/market"); }, [user, loading, items, navigate]);
+
+  useEffect(() => {
+    if (fulfillment === "pickup" || items.length === 0) { setShippingFee(0); return; }
+    const t = setTimeout(() => {
+      api.post("/shipping-quote", { fulfillment_type: "delivery", product_id: items[0].product_id,
+        delivery_lat: pin?.lat, delivery_lng: pin?.lng, delivery_address: address })
+        .then((r) => setShippingFee(r.data.shipping_fee)).catch(() => {});
+    }, 500);
+    return () => clearTimeout(t);
+  }, [fulfillment, pin, address, items]);
+
+  const grandTotal = fulfillment === "pickup" ? total : total + shippingFee;
 
   const submit = async () => {
     if (!phone.trim()) { toast.error("Please provide a contact phone."); return; }
@@ -139,7 +152,12 @@ export default function Checkout() {
             ))}
           </div>
           <div className="border-t border-border my-4" />
-          <div className="flex justify-between font-heading font-bold text-lg"><span>Total</span><span className="text-primary" data-testid="checkout-total">{peso(total)}</span></div>
+          <div className="space-y-1.5 text-sm">
+            <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="font-medium">{peso(total)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Shipping fee</span><span className="font-medium" data-testid="checkout-shipping">{fulfillment === "pickup" ? "Free (pickup)" : peso(shippingFee)}</span></div>
+          </div>
+          <div className="border-t border-border my-3" />
+          <div className="flex justify-between font-heading font-bold text-lg"><span>Total</span><span className="text-primary" data-testid="checkout-total">{peso(grandTotal)}</span></div>
           <Button data-testid="place-order-btn" onClick={submit} disabled={submitting} className="w-full mt-5 rounded-full bg-accent hover:bg-accent/90 text-accent-foreground h-12">
             {submitting ? "Processing…" : method === "cod" ? "Place order" : "Pay now"}
           </Button>

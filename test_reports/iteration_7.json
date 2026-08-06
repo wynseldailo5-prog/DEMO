@@ -1,0 +1,30 @@
+{
+  "summary": "Iteration 7 (shipping fee + temporary custom rider) fully verified end-to-end. Backend: 7/7 new tests PASS (POST /api/shipping-quote pickup=0, delivery>=₱49 base, coords path; /api/checkout persists subtotal/shipping_fee/total for delivery, zero for pickup; PUT /api/orders/{id}/assign-custom-rider sets order.rider with custom:true + status rider_assigned + history note; custom rider is NOT added to /api/riders). Frontend UI: buyer checkout shows Subtotal + 'Shipping fee' (checkout-shipping) + Total (checkout-total) — Santa Cruz, Laguna returns ₱131.00 shipping, ₱30 subtotal → ₱161 total; switching to Pick up at farm sets shipping to 'Free (pickup)' and Total collapses to subtotal (₱30); switching back to Deliver restores the fee. Order persists: /orders expanded card renders Subtotal ₱30.00, Shipping fee ₱131.00 (order-shipping-<id>), Total ₱161.00, and rider row 'TEST_Kuya Ramon · Motorcycle · 0917-111-2222 (temporary)' with OrderTracker at Rider Assigned. Seller 'New rider' dialog: opened via custom-rider-<orderId>, filled custom-rider-name/phone/vehicle (Tricycle), save-custom-rider-btn triggered toast 'Temporary rider assigned', order card immediately updated to 'TEST_UI Rider · Tricycle (temp)' with 'Rider Assigned' status. Regressions: saved-rider dropdown (assign-rider-*) still present on other delivery orders; pickup orders show no rider controls; COD delivery order placement + orders listing + cancellation UI all functional; no console/runtime errors observed.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration7.py",
+    "/app/test_reports/pytest/iter7.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 785 lines — past the 700-line split threshold. Recommend splitting into routers/ (auth, products, orders, checkout, reviews, seller, shipping, webhooks) before adding more features.",
+    "shipping-quote endpoint is unauthenticated — acceptable since it exposes only a fee, but consider rate-limiting to prevent map/geocoding abuse.",
+    "Custom rider payload has no length/format validation on phone/name (only Pydantic string). Consider max_length caps and a light phone regex to prevent DB bloat / bad data.",
+    "Checkout.jsx useEffect for /shipping-quote depends on `items` (whole array) — will re-run whenever cart items reference changes; a stable dep like items[0]?.product_id + total would avoid an unnecessary request but is a micro-optimization.",
+    "MUNICIPALITIES lookup uses substring match on product.location — if a seller enters just 'Laguna' the pickup falls back to LAGUNA_CENTER (fine per spec) but there is no UI hint to sellers that specifying a municipality yields a more accurate fee."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration7.py (new)"
+  ],
+  "success_rate": { "backend": "100% (7/7 iter7 tests)", "frontend": "100% on all 5 requested flows" },
+  "test_credentials": "Buyer aling.nena@laguna.ph/buyer123, Seller mang.kanor@laguna.ph/farmer123 (both working)",
+  "seed_data_creation": "Created delivery order (id 0c68d22e-...) via UI + backend tests placed additional TEST_ orders and assigned temp riders 'TEST_Kuya Ramon' (Motorcycle) and 'TEST_UI Rider' (Tricycle). Custom riders verified NOT persisted to /api/riders collection.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 7 (shipping + temporary custom rider) is production-ready. Shipping fee calc: ₱49 base + ₱6/km up to 5km, then ₱5/km beyond, computed via haversine between MUNICIPALITIES[seller pickup town] and drop-off (delivery pin coords preferred, else geocoded address). Custom rider stores {id: uuid, name, phone, vehicle, zone:'—', custom:true} on order.rider without touching db.riders. If future iteration adds product-level pickup coordinates or a proper geocoder, retest fee accuracy for products whose location = 'Laguna' (currently defaults to LAGUNA_CENTER)."
+}

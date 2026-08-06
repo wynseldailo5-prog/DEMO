@@ -72,13 +72,18 @@ export default function Orders() {
                       </div>
                     ))}
                   </div>
+                  <div className="text-sm space-y-1 bg-secondary/40 rounded-xl p-4">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{peso(o.subtotal ?? o.total)}</span></div>
+                    {o.fulfillment_type !== "pickup" && <div className="flex justify-between"><span className="text-muted-foreground">Shipping fee</span><span data-testid={`order-shipping-${o.id}`}>{peso(o.shipping_fee || 0)}</span></div>}
+                    <div className="flex justify-between font-heading font-bold pt-1 border-t border-border/60"><span>Total</span><span className="text-primary">{peso(o.total)}</span></div>
+                  </div>
                   <div className="grid sm:grid-cols-2 gap-3 text-sm bg-secondary/40 rounded-xl p-4">
                     {o.fulfillment_type === "pickup"
                       ? <div className="flex items-start gap-2"><Store size={15} className="mt-0.5 text-primary" /><span>{o.pickup_location || "Farm pickup"}</span></div>
                       : <div className="flex items-start gap-2"><MapPin size={15} className="mt-0.5 text-primary" /><span>{o.delivery_address}</span></div>}
                     <div className="flex items-center gap-2"><Phone size={15} className="text-primary" /><span>{o.contact_phone}</span></div>
                     <div className="flex items-center gap-2"><span className="text-muted-foreground">Payment:</span><span className="font-medium">{o.payment_method === "cod" ? "Cash" : o.payment_method === "gcash" ? "GCash" : "Online"} · {o.payment_status}</span></div>
-                    {o.rider && <div className="flex items-center gap-2"><Bike size={15} className="text-primary" /><span>{o.rider.name} · {o.rider.phone}</span></div>}
+                    {o.rider && <div className="flex items-center gap-2"><Bike size={15} className="text-primary" /><span>{o.rider.name}{o.rider.vehicle && o.rider.vehicle !== "—" ? ` · ${o.rider.vehicle}` : ""}{o.rider.phone ? ` · ${o.rider.phone}` : ""}{o.rider.custom ? " (temporary)" : ""}</span></div>}
                   </div>
 
                   {o.payment_method === "gcash" && o.payment_status !== "paid" && (

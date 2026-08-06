@@ -28,6 +28,8 @@ export default function SellerDashboard() {
   const [orders, setOrders] = useState([]);
   const [riders, setRiders] = useState([]);
   const [earnings, setEarnings] = useState(null);
+  const [customFor, setCustomFor] = useState(null);
+  const [customRider, setCustomRider] = useState({ name: "", phone: "", vehicle: "Motorcycle" });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [gcashOpen, setGcashOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -81,6 +83,13 @@ export default function SellerDashboard() {
   const del = async (id) => { await api.delete(`/products/${id}`); toast.success("Removed"); loadAll(); };
   const advance = async (o) => { const next = nextStatus(o); if (!next) return; await api.put(`/orders/${o.id}/status`, { status: next }); toast.success(`Marked ${STATUS_LABEL[next]}`); loadAll(); };
   const assignRider = async (orderId, riderId) => { await api.put(`/orders/${orderId}/assign-rider`, { rider_id: riderId }); toast.success("Rider assigned"); loadAll(); };
+  const assignCustom = async () => {
+    if (!customRider.name.trim()) { toast.error("Rider name is required"); return; }
+    await api.put(`/orders/${customFor}/assign-custom-rider`, customRider);
+    toast.success("Temporary rider assigned");
+    setCustomFor(null); setCustomRider({ name: "", phone: "", vehicle: "Motorcycle" });
+    loadAll();
+  };
   const cancelOrder = async (id) => { try { await api.put(`/orders/${id}/cancel`); toast.success("Cancelled & stock restored"); loadAll(); } catch (err) { toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Cannot cancel"); } };
   const verifyPayment = async (id) => { await api.put(`/orders/${id}/verify-payment`); toast.success("Payment confirmed"); loadAll(); };
 
@@ -198,6 +207,23 @@ export default function SellerDashboard() {
         ))}
       </div>
 
+      <Dialog open={!!customFor} onOpenChange={(v) => !v && setCustomFor(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle className="font-heading">Assign a temporary rider</DialogTitle><DialogDescription>Added just for this order and shown in its delivery history — not saved to your riders.</DialogDescription></DialogHeader>
+          <div className="space-y-3 mt-2">
+            <div><Label>Rider name</Label><Input data-testid="custom-rider-name" value={customRider.name} onChange={(e) => setCustomRider({ ...customRider, name: e.target.value })} className="mt-1.5" placeholder="e.g. Kuya Ramon" /></div>
+            <div><Label>Phone</Label><Input data-testid="custom-rider-phone" value={customRider.phone} onChange={(e) => setCustomRider({ ...customRider, phone: e.target.value })} className="mt-1.5" placeholder="0917-xxx-xxxx" /></div>
+            <div><Label>Vehicle</Label>
+              <Select value={customRider.vehicle} onValueChange={(v) => setCustomRider({ ...customRider, vehicle: v })}>
+                <SelectTrigger data-testid="custom-rider-vehicle" className="mt-1.5"><SelectValue /></SelectTrigger>
+                <SelectContent>{["Motorcycle", "Tricycle", "Bicycle", "Multicab", "Car", "Jeep"].map((v) => <SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <Button data-testid="save-custom-rider-btn" onClick={assignCustom} className="w-full rounded-full bg-primary hover:bg-primary/90">Assign rider</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Tabs defaultValue="orders">
         <TabsList className="mb-4"><TabsTrigger value="orders" data-testid="tab-orders">Incoming Orders</TabsTrigger><TabsTrigger value="products" data-testid="tab-products">My Products</TabsTrigger><TabsTrigger value="earnings" data-testid="tab-earnings">Earnings</TabsTrigger></TabsList>
 
@@ -227,11 +253,14 @@ export default function SellerDashboard() {
                     )}
                     {o.fulfillment_type !== "pickup" && !["delivered", "cancelled"].includes(o.status) && (
                       <Select onValueChange={(v) => assignRider(o.id, v)}>
-                        <SelectTrigger data-testid={`assign-rider-${o.id}`} className="h-8 w-48 rounded-full text-xs"><Bike size={13} className="mr-1" /><SelectValue placeholder={o.rider ? o.rider.name : "Assign rider"} /></SelectTrigger>
+                        <SelectTrigger data-testid={`assign-rider-${o.id}`} className="h-8 w-44 rounded-full text-xs"><Bike size={13} className="mr-1" /><SelectValue placeholder={o.rider ? o.rider.name : "Saved rider"} /></SelectTrigger>
                         <SelectContent>{riders.map((r) => <SelectItem key={r.id} value={r.id}>{r.name} · {r.zone}</SelectItem>)}</SelectContent>
                       </Select>
                     )}
-                    {o.rider && <span className="text-xs text-muted-foreground flex items-center gap-1"><Bike size={13} /> {o.rider.name}</span>}
+                    {o.fulfillment_type !== "pickup" && !["delivered", "cancelled"].includes(o.status) && (
+                      <Button data-testid={`custom-rider-${o.id}`} size="sm" variant="outline" onClick={() => setCustomFor(o.id)} className="h-8 rounded-full text-xs gap-1"><Plus size={12} /> New rider</Button>
+                    )}
+                    {o.rider && <span className="text-xs text-muted-foreground flex items-center gap-1"><Bike size={13} /> {o.rider.name}{o.rider.vehicle && o.rider.vehicle !== "—" ? ` · ${o.rider.vehicle}` : ""}{o.rider.custom ? " (temp)" : ""}</span>}
                     {o.payment_method === "gcash" && o.payment_status !== "paid" && (
                       <Button data-testid={`verify-payment-${o.id}`} size="sm" onClick={() => verifyPayment(o.id)} className="rounded-full bg-[#0079FF] hover:bg-[#0079FF]/90 text-white text-xs h-8">
                         {o.payment_status === "gcash_submitted" ? "Confirm payment received" : "Mark GCash paid"}

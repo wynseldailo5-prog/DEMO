@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
-import logging, uuid, bcrypt, jwt, requests, io, qrcode, hmac, hashlib
+import logging, uuid, bcrypt, jwt, requests, io, qrcode, hmac, hashlib, math
 
 from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
 
@@ -60,6 +60,38 @@ def verify_paymongo_signature(raw: bytes, header: str) -> bool:
     signed = f"{timestamp}.".encode() + raw
     expected = hmac.new(PAYMONGO_WEBHOOK_SECRET.encode(), signed, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, supplied)
+
+# ----------------------- Shipping fee (Laguna) -----------------------
+LAGUNA_CENTER = (14.17, 121.33)
+MUNICIPALITIES = {
+    "Calamba": (14.2117, 121.1653), "Los Baños": (14.1699, 121.2415),
+    "Santa Cruz": (14.2813, 121.4162), "San Pablo": (14.0683, 121.3256),
+    "Paete": (14.365, 121.484), "Nagcarlan": (14.136, 121.417), "Liliw": (14.129, 121.435),
+    "Bay": (14.184, 121.283), "Cabuyao": (14.275, 121.124), "Biñan": (14.337, 121.081),
+    "Santa Rosa": (14.312, 121.111), "San Pedro": (14.359, 121.048),
+}
+
+def match_coords(s):
+    if not s:
+        return LAGUNA_CENTER
+    sl = s.lower()
+    for name, c in MUNICIPALITIES.items():
+        if name.lower() in sl:
+            return c
+    return LAGUNA_CENTER
+
+def haversine(a, b):
+    lat1, lon1 = a
+    lat2, lon2 = b
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    h = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    return 2 * 6371 * math.asin(math.sqrt(h))
+
+def fee_from_distance(km):
+    # Lalamove-style motorcycle rate: ₱49 base + ₱6/km (0-5km) then ₱5/km
+    fee = 49 + (6 * km if km <= 5 else 30 + 5 * (km - 5))
+    return float(round(fee))
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -198,6 +230,18 @@ class GcashReference(BaseModel):
 class ReviewInput(BaseModel):
     rating: int = Field(ge=1, le=5)
     comment: str = ""
+
+class CustomRider(BaseModel):
+    name: str
+    phone: str = ""
+    vehicle: str = "Motorcycle"
+
+class ShippingQuoteInput(BaseModel):
+    fulfillment_type: str = "delivery"
+    product_id: Optional[str] = None
+    delivery_lat: Optional[float] = None
+    delivery_lng: Optional[float] = None
+    delivery_address: str = ""
 
 ORDER_STAGES = ["pending", "confirmed", "packed", "rider_assigned", "out_for_delivery", "delivered", "ready_for_pickup", "picked_up", "cancelled"]
 
@@ -393,11 +437,21 @@ async def checkout(data: CheckoutInput, request: Request, user: dict = Depends(g
     if not data.items:
         raise HTTPException(status_code=400, detail="Cart is empty")
     items = [i.model_dump() for i in data.items]
-    total = order_total(items)
+    subtotal = order_total(items)
+    shipping_fee = 0.0
+    if data.fulfillment_type == "delivery":
+        first = await db.products.find_one({"id": items[0]["product_id"]})
+        pickup = match_coords(first.get("location") if first else None)
+        if data.delivery_lat is not None and data.delivery_lng is not None:
+            dropoff = (data.delivery_lat, data.delivery_lng)
+        else:
+            dropoff = match_coords(data.delivery_address)
+        shipping_fee = fee_from_distance(haversine(pickup, dropoff))
+    total = round(subtotal + shipping_fee, 2)
     order_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     order = {"id": order_id, "buyer_id": str(user["_id"]), "buyer_name": user.get("name"),
-             "items": items, "total": total, "delivery_address": data.delivery_address,
+             "items": items, "subtotal": subtotal, "shipping_fee": shipping_fee, "total": total, "delivery_address": data.delivery_address,
              "delivery_lat": data.delivery_lat, "delivery_lng": data.delivery_lng,
              "fulfillment_type": data.fulfillment_type, "pickup_location": data.pickup_location,
              "contact_phone": data.contact_phone, "payment_method": data.payment_method,
@@ -578,6 +632,35 @@ async def assign_rider(order_id: str, data: RiderAssign, user: dict = Depends(re
         {"$set": {"rider": rider, "status": "rider_assigned", "updated_at": now},
          "$push": {"history": {"status": "rider_assigned", "at": now}}})
     return await db.orders.find_one({"id": order_id}, {"_id": 0})
+
+@api_router.put("/orders/{order_id}/assign-custom-rider")
+async def assign_custom_rider(order_id: str, data: CustomRider, user: dict = Depends(require_seller)):
+    o = await db.orders.find_one({"id": order_id})
+    if not o:
+        raise HTTPException(status_code=404, detail="Order not found")
+    now = datetime.now(timezone.utc).isoformat()
+    rider = {"id": str(uuid.uuid4()), "name": data.name, "phone": data.phone,
+             "vehicle": data.vehicle, "zone": "—", "custom": True}
+    await db.orders.update_one({"id": order_id},
+        {"$set": {"rider": rider, "status": "rider_assigned", "updated_at": now},
+         "$push": {"history": {"status": "rider_assigned", "at": now, "note": f"Rider {data.name} ({data.vehicle}) assigned"}}})
+    return await db.orders.find_one({"id": order_id}, {"_id": 0})
+
+@api_router.post("/shipping-quote")
+async def shipping_quote(data: ShippingQuoteInput):
+    if data.fulfillment_type == "pickup":
+        return {"shipping_fee": 0.0, "distance_km": 0}
+    pickup = LAGUNA_CENTER
+    if data.product_id:
+        p = await db.products.find_one({"id": data.product_id})
+        if p:
+            pickup = match_coords(p.get("location"))
+    if data.delivery_lat is not None and data.delivery_lng is not None:
+        dropoff = (data.delivery_lat, data.delivery_lng)
+    else:
+        dropoff = match_coords(data.delivery_address)
+    dist = haversine(pickup, dropoff)
+    return {"shipping_fee": fee_from_distance(dist), "distance_km": round(dist, 1)}
 
 @api_router.put("/orders/{order_id}/cancel")
 async def cancel_order(order_id: str, user: dict = Depends(get_current_user)):
