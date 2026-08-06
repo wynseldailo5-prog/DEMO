@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 6 testing complete. Backend: 8/9 iter6 tests + 17/18 legacy tests pass (1 pre-existing Stripe minimum-amount failure unrelated to this iteration). Frontend: all 5 in-scope UI flows PASS - buyer review submission (toast + reviews-list update + header StarRating 5.0(1) + Seller 5.0(1)), Earnings tab renders all 4 summary cards + pending + per-order table, seller My Products cards all display star ratings (12/12), market product cards all display ratings (13/13), GCash manual mode still active (seen in seller dashboard order #337ba407 with 'Mark GCash paid' button + gcash_pending state). Found + FIXED one CRITICAL backend bug: stray '@api_router.get(\"/seller/stats\")' decorator at server.py:338 with no attached function was incorrectly wrapping create_product, causing GET /api/seller/stats to return 422 and breaking the entire Seller Dashboard load (Promise.all rejection). Removed the stray decorator.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/checkout (online/Stripe)", "issue": "Stripe rejects orders < $0.50 (₱25 test product totals $0.41). Pre-existing, not iter6 related. Consider validating min-cart total in checkout endpoint before calling Stripe."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration6.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iter6.xml"
+  ],
+  "action_items": [
+    "(Optional) Add min-total validation before Stripe checkout to return a friendly 400 instead of 500 when cart total < $0.50 equivalent."
+  ],
+  "critical_code_review_comments": [
+    "FIXED: /app/backend/server.py:338 had a stray '@api_router.get(\"/seller/stats\")' decorator with no function body. This decorator was silently attached to the next-defined function (create_product), registering GET /api/seller/stats -> create_product which requires a POST body -> 422 for every GET call. It also duplicated the real /seller/stats route defined at line 642. The stray decorator has been removed. Root cause suggests an incomplete refactor; recommend running `python -c 'import server'` in CI to catch such issues, and adding a startup route-uniqueness assertion.",
+    "server.py is 697 lines - approaching the 700-line split threshold. Consider splitting into routers/ (auth.py, products.py, orders.py, checkout.py, reviews.py, seller.py, webhooks.py) for maintainability.",
+    "seller_earnings endpoint (line 309) sums per-item amounts correctly per seller_id which is good, but does not include delivery_fee or discount handling — acceptable for MVP but flag for future.",
+    "ReviewInput has rating validation (ge=1 le=5) but no comment length cap — consider max_length to prevent DB bloat."
+  ],
+  "updated_files": [
+    "/app/backend/server.py (removed stray decorator line 338)",
+    "/app/backend/tests/test_iteration6.py (new)"
+  ],
+  "success_rate": {"backend": "96% (25/26 iter6-relevant tests pass; 1 pre-existing Stripe min-amount failure)", "frontend": "100% on all requested iter6 flows"},
+  "test_credentials": "Buyer aling.nena@laguna.ph/buyer123, Seller mang.kanor@laguna.ph/farmer123 (verified working)",
+  "seed_data_creation": "Created 1 review (rating=5, product dcc91f84-1d7f-4efb-b165-e8431e2c0630 TEST_Iter2_73a786) via UI + 1 review via backend test. Created 1 manual-mode GCash order via backend test.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 6 features (Ratings & Reviews, Seller Earnings, GCash manual regression) all verified working end-to-end. One backend blocker (stray decorator on /seller/stats) was auto-fixed. PayMongo keys remain empty by design; GCash stays in manual mode. If PAYMONGO_SECRET_KEY gets configured later, need to retest the auto-mode branch (/api/webhook/paymongo signature verification, hosted checkout redirect, GcashPayment.jsx polling view).",
+  "rca of the issue": "Bug: GET /api/seller/stats returned 422. Reproduction: `curl -H 'Authorization: Bearer <seller-token>' /api/seller/stats` returns 422 with 'body Field required'. Root cause: /app/backend/server.py line 338 had a floating `@api_router.get(\"/seller/stats\")` decorator (no function on the next non-blank line). Python decorator chaining meant it was applied to the subsequent `create_product` function together with `@api_router.post(\"/products\")`, registering GET /seller/stats -> create_product which requires a POST body. FastAPI matched the first-registered route so all GET /seller/stats calls hit create_product -> 422. Impact: SellerDashboard.loadAll() uses Promise.all with /seller/stats first — one rejection broke the entire seller dashboard rendering (stats, products, orders, riders, earnings). Fix: removed the stray decorator. Mitigation: add a smoke test hitting every registered GET route on server startup."
+}

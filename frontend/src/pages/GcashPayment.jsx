@@ -5,7 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Wallet, Copy, CheckCircle2, ArrowLeft } from "lucide-react";
+import { Wallet, Copy, CheckCircle2, ArrowLeft, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 export default function GcashPayment() {
@@ -19,10 +19,20 @@ export default function GcashPayment() {
   useEffect(() => {
     if (loading) return;
     if (!user) { navigate("/login"); return; }
-    api.get(`/orders/${orderId}`).then((r) => setOrder(r.data)).catch(() => navigate("/orders"));
+    let timer;
+    const fetchOrder = () => api.get(`/orders/${orderId}`).then((r) => {
+      setOrder(r.data);
+      if (r.data.gcash_mode === "auto" && r.data.payment_status !== "paid") {
+        timer = setTimeout(fetchOrder, 2500);
+      }
+    }).catch(() => navigate("/orders"));
+    fetchOrder();
+    return () => { if (timer) clearTimeout(timer); };
   }, [orderId, user, loading, navigate]);
 
   if (!order) return <div className="max-w-md mx-auto px-4 py-24 text-center text-muted-foreground">Loading…</div>;
+
+  const isAuto = order.gcash_mode === "auto";
 
   const info = order.gcash_info || {};
   const already = order.payment_status === "gcash_submitted" || order.payment_status === "paid";
@@ -41,6 +51,37 @@ export default function GcashPayment() {
   };
 
   const qrSrc = info.qr_url ? fileUrl(info.qr_url) : `${API}/gcash-qr/${orderId}`;
+
+  if (isAuto) {
+    const paid = order.payment_status === "paid";
+    return (
+      <div className="max-w-md mx-auto px-4 sm:px-6 py-8" data-testid="gcash-pay-page">
+        <button onClick={() => navigate("/orders")} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-5"><ArrowLeft size={16} /> Orders</button>
+        <div className="bg-card border border-border rounded-3xl overflow-hidden text-center">
+          <div className="bg-[#0079FF] text-white p-6">
+            <div className="flex items-center justify-center gap-2 font-heading font-black text-xl"><Wallet size={22} /> GCash</div>
+            <div className="font-heading font-black text-3xl mt-3">{peso(order.total)}</div>
+          </div>
+          <div className="p-8" data-testid="gcash-auto-status">
+            {paid ? (
+              <>
+                <CheckCircle2 size={56} className="mx-auto text-primary" />
+                <h1 className="font-heading font-black text-2xl mt-4">Payment confirmed!</h1>
+                <p className="text-muted-foreground mt-1">Your GCash payment was verified automatically. The seller will prepare your order.</p>
+              </>
+            ) : (
+              <>
+                <Loader2 size={48} className="mx-auto text-[#0079FF] animate-spin" />
+                <h1 className="font-heading font-bold text-xl mt-4">Confirming your GCash payment…</h1>
+                <p className="text-muted-foreground text-sm mt-1">This updates automatically once GCash confirms. You can safely wait here or check your orders shortly.</p>
+              </>
+            )}
+            <Button onClick={() => navigate("/orders")} className="mt-6 rounded-full bg-primary hover:bg-primary/90">View orders</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-md mx-auto px-4 sm:px-6 py-8" data-testid="gcash-pay-page">

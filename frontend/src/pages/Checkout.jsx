@@ -49,8 +49,12 @@ export default function Checkout() {
         navigate("/orders");
       } else if (method === "gcash") {
         clear();
-        toast.success("Order placed! Complete your GCash payment.");
-        navigate(`/gcash-pay/${data.order_id}`);
+        if (data.gcash_mode === "auto") {
+          window.location.href = data.checkout_url;
+        } else {
+          toast.success("Order placed! Complete your GCash payment.");
+          navigate(`/gcash-pay/${data.order_id}`);
+        }
       } else {
         localStorage.setItem("pending_order", data.order_id);
         window.location.href = data.checkout_url;

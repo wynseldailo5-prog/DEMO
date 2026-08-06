@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { fileUrl, peso } from "@/lib/api";
 import { useCart } from "@/context/CartContext";
+import StarRating from "@/components/StarRating";
 import { MapPin, Plus, Leaf } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -26,6 +27,7 @@ export default function ProductCard({ product, index = 0 }) {
       <div className="p-4">
         <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1"><Leaf size={12} className="text-primary" />{product.seller_name}</div>
         <Link to={`/product/${product.id}`}><h3 className="font-heading font-bold text-base leading-tight line-clamp-1">{product.name}</h3></Link>
+        <div className="mt-1"><StarRating value={product.rating_avg || 0} count={product.rating_count || 0} showEmpty={false} /></div>
         <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1"><MapPin size={12} />{product.location}</div>
         <div className="flex items-end justify-between mt-3">
           <div>

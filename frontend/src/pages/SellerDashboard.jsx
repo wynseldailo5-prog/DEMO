@@ -9,8 +9,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Plus, Package, Wallet, ShoppingBag, Upload, Trash2, Bike, ImageIcon, X, Store, Copy } from "lucide-react";
+import { Plus, Package, Wallet, ShoppingBag, Upload, Trash2, Bike, ImageIcon, X, Store, Copy, CreditCard, Banknote, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
+import StarRating from "@/components/StarRating";
 
 const CATEGORIES = ["Vegetables", "Fruits", "Rice & Grains", "Herbs", "Root Crops", "Dairy & Eggs"];
 const UNITS = ["kg", "piece", "bundle", "sack", "tray", "liter"];
@@ -26,6 +27,7 @@ export default function SellerDashboard() {
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [riders, setRiders] = useState([]);
+  const [earnings, setEarnings] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [gcashOpen, setGcashOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -40,10 +42,10 @@ export default function SellerDashboard() {
   }, [user]);
 
   const loadAll = async () => {
-    const [s, p, o, r] = await Promise.all([
-      api.get("/seller/stats"), api.get("/products", { params: { seller_id: user.id } }), api.get("/orders"), api.get("/riders"),
+    const [s, p, o, r, e] = await Promise.all([
+      api.get("/seller/stats"), api.get("/products", { params: { seller_id: user.id } }), api.get("/orders"), api.get("/riders"), api.get("/seller/earnings"),
     ]);
-    setStats(s.data); setProducts(p.data); setOrders(o.data); setRiders(r.data);
+    setStats(s.data); setProducts(p.data); setOrders(o.data); setRiders(r.data); setEarnings(e.data);
   };
 
   useEffect(() => {
@@ -197,7 +199,7 @@ export default function SellerDashboard() {
       </div>
 
       <Tabs defaultValue="orders">
-        <TabsList className="mb-4"><TabsTrigger value="orders" data-testid="tab-orders">Incoming Orders</TabsTrigger><TabsTrigger value="products" data-testid="tab-products">My Products</TabsTrigger></TabsList>
+        <TabsList className="mb-4"><TabsTrigger value="orders" data-testid="tab-orders">Incoming Orders</TabsTrigger><TabsTrigger value="products" data-testid="tab-products">My Products</TabsTrigger><TabsTrigger value="earnings" data-testid="tab-earnings">Earnings</TabsTrigger></TabsList>
 
         <TabsContent value="orders">
           {orders.length === 0 ? <p className="text-muted-foreground text-center py-12">No orders yet.</p> : (
@@ -253,11 +255,47 @@ export default function SellerDashboard() {
                   <div className="aspect-[4/3] bg-muted"><img src={fileUrl(p.image_url) || "https://images.unsplash.com/photo-1687199129802-3e4cc27baac0?w=400"} alt={p.name} className="h-full w-full object-cover" /></div>
                   <div className="p-3">
                     <div className="font-heading font-bold text-sm line-clamp-1">{p.name}</div>
+                    <div className="mt-0.5"><StarRating value={p.rating_avg || 0} count={p.rating_count || 0} size={12} showEmpty={false} /></div>
                     <div className="text-xs text-muted-foreground">{peso(p.price)}/{p.unit} · {p.stock} left</div>
                     <button data-testid={`delete-product-${p.id}`} onClick={() => del(p.id)} className="mt-2 text-xs text-destructive flex items-center gap-1 hover:underline"><Trash2 size={12} /> Remove</button>
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="earnings">
+          {!earnings ? <p className="text-muted-foreground text-center py-12">Loading…</p> : (
+            <div>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {[{ icon: CreditCard, label: "Card / Online", value: earnings.breakdown.online, testid: "earn-online" },
+                  { icon: Wallet, label: "GCash", value: earnings.breakdown.gcash, testid: "earn-gcash" },
+                  { icon: Banknote, label: "Cash", value: earnings.breakdown.cod, testid: "earn-cod" },
+                  { icon: TrendingUp, label: "Total earned", value: earnings.total, testid: "earn-total", highlight: true }].map((c) => (
+                  <div key={c.label} className={`rounded-2xl p-5 border ${c.highlight ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border"}`}>
+                    <c.icon size={22} className={c.highlight ? "text-primary-foreground" : "text-primary"} />
+                    <div className="font-heading font-black text-2xl mt-2" data-testid={c.testid}>{peso(c.value)}</div>
+                    <div className={`text-xs uppercase tracking-wider ${c.highlight ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{c.label}</div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-sm text-muted-foreground mt-3">Pending (not yet paid / delivered): <span className="font-semibold text-foreground" data-testid="earn-pending">{peso(earnings.pending)}</span></p>
+
+              <div className="mt-6 bg-card border border-border rounded-2xl overflow-hidden">
+                <div className="grid grid-cols-12 gap-2 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground border-b border-border">
+                  <div className="col-span-4">Order</div><div className="col-span-2">Method</div><div className="col-span-3">Status</div><div className="col-span-3 text-right">Your income</div>
+                </div>
+                {earnings.orders.length === 0 ? <p className="text-muted-foreground text-center py-8 text-sm">No orders yet.</p> :
+                  earnings.orders.map((r) => (
+                    <div key={r.order_id} className="grid grid-cols-12 gap-2 px-4 py-3 text-sm border-b border-border/60 last:border-0 items-center">
+                      <div className="col-span-4 min-w-0"><div className="font-medium truncate">#{r.order_id.slice(0, 8)}</div><div className="text-xs text-muted-foreground truncate">{r.buyer_name} · {new Date(r.date).toLocaleDateString()}</div></div>
+                      <div className="col-span-2 text-xs">{r.method === "cod" ? "Cash" : r.method === "gcash" ? "GCash" : "Card"}</div>
+                      <div className="col-span-3"><span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${r.realized ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>{r.realized ? "Earned" : "Pending"}</span></div>
+                      <div className="col-span-3 text-right font-semibold">{peso(r.amount)}</div>
+                    </div>
+                  ))}
+              </div>
             </div>
           )}
         </TabsContent>

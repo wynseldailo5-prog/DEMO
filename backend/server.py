@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
-import logging, uuid, bcrypt, jwt, requests, io, qrcode
+import logging, uuid, bcrypt, jwt, requests, io, qrcode, hmac, hashlib
 
 from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
 
@@ -26,6 +26,40 @@ JWT_ALGORITHM = "HS256"
 STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
 EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
 APP_NAME = "laguna-farm"
+
+PAYMONGO_SECRET_KEY = os.environ.get("PAYMONGO_SECRET_KEY", "")
+PAYMONGO_WEBHOOK_SECRET = os.environ.get("PAYMONGO_WEBHOOK_SECRET", "")
+
+def create_paymongo_session(amount_centavos: int, order_id: str, origin_url: str) -> dict:
+    payload = {"data": {"attributes": {
+        "line_items": [{"amount": amount_centavos, "currency": "PHP", "name": "FarmDirect Laguna order", "quantity": 1}],
+        "payment_method_types": ["gcash"],
+        "success_url": f"{origin_url}/gcash-pay/{order_id}",
+        "cancel_url": f"{origin_url}/gcash-pay/{order_id}",
+        "reference_number": order_id,
+        "metadata": {"order_id": order_id},
+        "show_line_items": True,
+    }}}
+    r = requests.post("https://api.paymongo.com/v2/checkout_sessions",
+                      auth=(PAYMONGO_SECRET_KEY, ""),
+                      headers={"Content-Type": "application/json",
+                               "Idempotency-Key": hashlib.sha256(f"checkout:{order_id}".encode()).hexdigest()},
+                      json=payload, timeout=20)
+    r.raise_for_status()
+    body = r.json()["data"]
+    return {"id": body["id"], "checkout_url": body["attributes"]["checkout_url"]}
+
+def verify_paymongo_signature(raw: bytes, header: str) -> bool:
+    if not header or not PAYMONGO_WEBHOOK_SECRET:
+        return False
+    parts = dict(item.split("=", 1) for item in header.split(",") if "=" in item)
+    timestamp = parts.get("t")
+    supplied = parts.get("li" if PAYMONGO_SECRET_KEY.startswith("sk_live_") else "te")
+    if not timestamp or not supplied:
+        return False
+    signed = f"{timestamp}.".encode() + raw
+    expected = hmac.new(PAYMONGO_WEBHOOK_SECRET.encode(), signed, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, supplied)
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -161,6 +195,10 @@ class GcashReference(BaseModel):
     reference: str
     proof_url: Optional[str] = None
 
+class ReviewInput(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    comment: str = ""
+
 ORDER_STAGES = ["pending", "confirmed", "packed", "rider_assigned", "out_for_delivery", "delivered", "ready_for_pickup", "picked_up", "cancelled"]
 
 # ----------------------- Auth routes -----------------------
@@ -238,7 +276,64 @@ async def get_product(product_id: str):
     p = await db.products.find_one({"id": product_id}, {"_id": 0})
     if not p:
         raise HTTPException(status_code=404, detail="Product not found")
+    srevs = await db.reviews.find({"seller_id": p["seller_id"]}).to_list(2000)
+    p["seller_rating"] = round(sum(r["rating"] for r in srevs) / len(srevs), 1) if srevs else 0
+    p["seller_review_count"] = len(srevs)
     return p
+
+@api_router.get("/products/{product_id}/reviews")
+async def list_reviews(product_id: str):
+    return await db.reviews.find({"product_id": product_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+@api_router.post("/products/{product_id}/reviews")
+async def add_review(product_id: str, data: ReviewInput, user: dict = Depends(get_current_user)):
+    product = await db.products.find_one({"id": product_id})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    purchased = await db.orders.find_one({"buyer_id": str(user["_id"]), "items.product_id": product_id})
+    if not purchased:
+        raise HTTPException(status_code=403, detail="You can review only products you've ordered")
+    now = datetime.now(timezone.utc).isoformat()
+    existing = await db.reviews.find_one({"product_id": product_id, "buyer_id": str(user["_id"])})
+    if existing:
+        await db.reviews.update_one({"id": existing["id"]}, {"$set": {"rating": data.rating, "comment": data.comment, "created_at": now}})
+    else:
+        await db.reviews.insert_one({"id": str(uuid.uuid4()), "product_id": product_id, "seller_id": product["seller_id"],
+                                     "buyer_id": str(user["_id"]), "buyer_name": user.get("name"),
+                                     "rating": data.rating, "comment": data.comment, "created_at": now})
+    revs = await db.reviews.find({"product_id": product_id}).to_list(1000)
+    avg = round(sum(r["rating"] for r in revs) / len(revs), 1) if revs else 0
+    await db.products.update_one({"id": product_id}, {"$set": {"rating_avg": avg, "rating_count": len(revs)}})
+    return {"ok": True, "rating_avg": avg, "rating_count": len(revs)}
+
+@api_router.get("/seller/earnings")
+async def seller_earnings(user: dict = Depends(require_seller)):
+    uid = str(user["_id"])
+    orders = await db.orders.find({"seller_ids": uid}, {"_id": 0}).to_list(2000)
+    breakdown = {"online": 0.0, "gcash": 0.0, "cod": 0.0}
+    pending = 0.0
+    rows = []
+    for o in orders:
+        if o.get("status") == "cancelled":
+            continue
+        amt = round(sum(i["price"] * i["quantity"] for i in o["items"] if i["seller_id"] == uid), 2)
+        method = o.get("payment_method")
+        realized = False
+        if method in ("online", "gcash") and o.get("payment_status") == "paid":
+            breakdown["online" if method == "online" else "gcash"] += amt
+            realized = True
+        elif method == "cod" and o.get("status") in ("delivered", "picked_up"):
+            breakdown["cod"] += amt
+            realized = True
+        else:
+            pending += amt
+        rows.append({"order_id": o["id"], "date": o["created_at"], "method": method,
+                     "status": o["status"], "payment_status": o.get("payment_status"),
+                     "buyer_name": o.get("buyer_name"), "amount": amt, "realized": realized})
+    total = round(sum(breakdown.values()), 2)
+    breakdown = {k: round(v, 2) for k, v in breakdown.items()}
+    rows.sort(key=lambda r: r["date"], reverse=True)
+    return {"breakdown": breakdown, "total": total, "pending": round(pending, 2), "orders": rows}
 
 @api_router.post("/products")
 async def create_product(data: ProductInput, user: dict = Depends(require_seller)):
@@ -314,6 +409,21 @@ async def checkout(data: CheckoutInput, request: Request, user: dict = Depends(g
         return {"order_id": order_id, "payment_method": "cod"}
 
     if data.payment_method == "gcash":
+        if PAYMONGO_SECRET_KEY:
+            centavos = int(round(total * 100))
+            try:
+                session = create_paymongo_session(centavos, order_id, data.origin_url)
+            except Exception as e:
+                for i in items:
+                    await db.products.update_one({"id": i["product_id"]}, {"$inc": {"stock": i["quantity"]}})
+                logger.error(f"paymongo error: {e}")
+                raise HTTPException(status_code=502, detail="Could not start GCash payment. Please try again.")
+            order["payment_status"] = "gcash_pending"
+            order["gcash_mode"] = "auto"
+            order["paymongo_session_id"] = session["id"]
+            await db.orders.insert_one(dict(order))
+            return {"order_id": order_id, "gcash_mode": "auto", "checkout_url": session["checkout_url"]}
+        # manual direct-to-seller GCash fallback
         seller_id = items[0]["seller_id"]
         seller = await db.users.find_one({"_id": ObjectId(seller_id)})
         if not seller or not seller.get("gcash_number"):
@@ -321,9 +431,10 @@ async def checkout(data: CheckoutInput, request: Request, user: dict = Depends(g
                 await db.products.update_one({"id": i["product_id"]}, {"$inc": {"stock": i["quantity"]}})
             raise HTTPException(status_code=400, detail="This seller hasn't set up GCash yet. Please pick another payment method.")
         order["payment_status"] = "gcash_pending"
+        order["gcash_mode"] = "manual"
         order["gcash_info"] = {"number": seller.get("gcash_number"), "name": seller.get("gcash_name"), "qr_url": seller.get("gcash_qr_url")}
         await db.orders.insert_one(dict(order))
-        return {"order_id": order_id, "payment_method": "gcash"}
+        return {"order_id": order_id, "payment_method": "gcash", "gcash_mode": "manual"}
 
     # online payment
     host_url = str(request.base_url)
@@ -398,6 +509,24 @@ async def stripe_webhook(request: Request):
             if order and order.get("payment_status") != "paid":
                 await restore_stock(order)
     return {"status": "ok"}
+
+@api_router.post("/webhook/paymongo")
+async def paymongo_webhook(request: Request):
+    raw = await request.body()
+    if not verify_paymongo_signature(raw, request.headers.get("Paymongo-Signature")):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    event = await request.json()
+    attrs = event.get("data", {}).get("attributes", {})
+    etype = attrs.get("type")
+    resource = attrs.get("data", {})
+    if etype == "checkout_session.payment.paid":
+        a = resource.get("attributes", {})
+        oid = a.get("reference_number") or a.get("metadata", {}).get("order_id")
+        if oid:
+            now = datetime.now(timezone.utc).isoformat()
+            await db.orders.update_one({"id": oid, "payment_status": {"$ne": "paid"}},
+                {"$set": {"payment_status": "paid", "updated_at": now}})
+    return {"received": True}
 
 @api_router.get("/orders")
 async def my_orders(user: dict = Depends(get_current_user)):
