@@ -38,7 +38,7 @@ export default function MapPicker({ value, onChange, height = 260 }) {
     }).addTo(map);
     mapRef.current = map;
     if (has) markerRef.current = window.L.marker(center).addTo(map);
-    map.on("click", (e) => setPin(e.latlng.lat, e.latlng.lng));
+    map.whenReady(() => map.on("click", (e) => setPin(e.latlng.lat, e.latlng.lng)));
     setTimeout(() => map.invalidateSize(), 250);
     return () => map.remove();
     // eslint-disable-next-line

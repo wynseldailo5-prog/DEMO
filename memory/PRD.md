@@ -46,7 +46,14 @@ Build a Shopee-style marketplace for farmers (sellers) and buyers within Laguna 
 
 ## Next Tasks
 - Refund flow for paid online/GCash orders.
-- Split server.py into routers (now ~785 lines).
+- Split server.py into routers (now ~828 lines).
+
+## Implemented (2026-06, iteration 6 — Rider role, live tracking, accurate address, QR warning)
+- Accurate checkout address: MapPicker reverse-geocodes pin/location (Nominatim) and auto-fills the delivery address; "Use my location" via browser geolocation. [done]
+- Rider role: riders register/login (role selector), auto-added to riders list so sellers can assign them; /rider portal lists assigned deliveries with accurate address, map, Google Maps directions, buyer contact, and Start delivery / Mark delivered actions (PUT /api/orders/{id}/rider-status). [done]
+- Real-time tracking: rider "Share live location" (geolocation watch) posts to PUT /api/orders/{id}/rider-location; buyer order map shows the live rider marker and polls every 5s. [done]
+- GCash QR-missing: prominent amber warning on /gcash-pay when the seller has no uploaded QR (auto-generated code is not an official GCash QR). [done]
+- Rider endpoints are rider-owned (buyer/seller get 403). Tested iteration_8: 6/6 frontend flows + backend rider chain verified.
 
 ## Implemented (2026-06, iteration 5 — Shipping fee, Temporary riders, Delivery-gated reviews)
 - Reviews now require the buyer's order to be delivered/picked_up (GET /api/products/{id}/can-review gates the UI form). [done]
