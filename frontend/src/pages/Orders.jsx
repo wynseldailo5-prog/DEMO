@@ -4,7 +4,8 @@ import api, { fileUrl, peso, formatApiErrorDetail } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import OrderTracker from "@/components/OrderTracker";
 import DeliveryMap from "@/components/DeliveryMap";
-import { Package, MapPin, Phone, Bike, ChevronDown, Store, X, Wallet } from "lucide-react";
+import { etaFrom, matchCoords } from "@/lib/laguna";
+import { Package, MapPin, Phone, Bike, ChevronDown, Store, X, Wallet, Clock } from "lucide-react";
 import { toast } from "sonner";
 
 const FALLBACK = "https://images.unsplash.com/photo-1687199129802-3e4cc27baac0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwxfHxmcmVzaCUyMHZlZ2V0YWJsZXMlMjBtYXJrZXQlMjBzdGFsbHxlbnwwfHx8fDE3ODU1NTQzMDd8MA&ixlib=rb-4.1.0&q=85";
@@ -68,7 +69,14 @@ export default function Orders() {
 
                   {o.status !== "cancelled" && (
                     <div>
-                      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">{o.fulfillment_type === "pickup" ? "Pickup location" : "Live delivery map"}</div>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{o.fulfillment_type === "pickup" ? "Pickup location" : "Live delivery map"}</div>
+                        {o.fulfillment_type !== "pickup" && o.status === "out_for_delivery" && o.rider_location && (() => {
+                          const dropoff = o.delivery_lat != null ? { lat: o.delivery_lat, lng: o.delivery_lng } : matchCoords(o.delivery_address);
+                          const eta = etaFrom(o.rider_location, dropoff);
+                          return <span data-testid={`eta-${o.id}`} className="inline-flex items-center gap-1 text-xs font-semibold bg-primary/10 text-primary px-2.5 py-1 rounded-full"><Clock size={12} /> ~{eta.min} min · {eta.km} km away</span>;
+                        })()}
+                      </div>
                       <DeliveryMap order={o} />
                     </div>
                   )}

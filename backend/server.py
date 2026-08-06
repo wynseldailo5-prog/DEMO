@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
-import logging, uuid, bcrypt, jwt, requests, io, qrcode, hmac, hashlib, math
+import logging, uuid, bcrypt, jwt, requests, io, qrcode, hmac, hashlib, math, httpx
 
 from emergentintegrations.payments.stripe.checkout import StripeCheckout, CheckoutSessionRequest
 
@@ -29,6 +29,31 @@ APP_NAME = "laguna-farm"
 
 PAYMONGO_SECRET_KEY = os.environ.get("PAYMONGO_SECRET_KEY", "")
 PAYMONGO_WEBHOOK_SECRET = os.environ.get("PAYMONGO_WEBHOOK_SECRET", "")
+
+EMAIL_BASE_URL = "https://integrations.emergentagent.com"
+EMAIL_KEY = os.environ.get("EMERGENT_EMAIL_KEY", "")
+EMAIL_FROM_NAME = os.environ.get("EMAIL_FROM_NAME", "FarmDirect Laguna")
+
+async def send_email(to: str, subject: str, html: str):
+    if not to or not EMAIL_KEY:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(f"{EMAIL_BASE_URL}/api/v1/email/send",
+                                  headers={"X-Email-Key": EMAIL_KEY},
+                                  json={"to": [to], "subject": subject, "html": html, "from_name": EMAIL_FROM_NAME})
+        r.raise_for_status()
+    except Exception as e:
+        logger.error(f"email send failed: {e}")
+
+def order_email_html(title: str, body: str) -> str:
+    return f"""<table width="100%" cellpadding="0" cellspacing="0" style="background:#f9f8f4;padding:24px;font-family:Arial,sans-serif">
+<tr><td align="center"><table width="480" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:16px;overflow:hidden">
+<tr><td style="background:#2D5A40;padding:20px 24px;color:#fff;font-size:20px;font-weight:bold">🌱 FarmDirect Laguna</td></tr>
+<tr><td style="padding:24px"><h2 style="margin:0 0 12px;color:#16281b">{title}</h2>
+<p style="margin:0;color:#59685e;font-size:15px;line-height:1.6">{body}</p></td></tr>
+<tr><td style="padding:16px 24px;background:#ebe8e0;color:#59685e;font-size:12px">Farm-fresh from Laguna's farmers.</td></tr>
+</table></td></tr></table>"""
 
 def create_paymongo_session(amount_centavos: int, order_id: str, origin_url: str) -> dict:
     payload = {"data": {"attributes": {
@@ -694,6 +719,19 @@ async def rider_update_status(order_id: str, data: StatusUpdate, user: dict = De
     await db.orders.update_one({"id": order_id},
         {"$set": {"status": data.status, "updated_at": now},
          "$push": {"history": {"status": data.status, "at": now}}})
+    buyer = await db.users.find_one({"_id": ObjectId(o["buyer_id"])})
+    rider_name = (o.get("rider") or {}).get("name", "Your rider")
+    if buyer and buyer.get("email"):
+        if data.status == "out_for_delivery":
+            await send_email(buyer["email"], f"Your FarmDirect order #{order_id[:8]} is on the way!",
+                order_email_html("Your order is on the way! 🛵",
+                    f"{rider_name} has started your delivery to <b>{o.get('delivery_address')}</b>. "
+                    f"Track the rider live in your Orders page."))
+        elif data.status == "delivered":
+            await send_email(buyer["email"], f"Your FarmDirect order #{order_id[:8]} was delivered",
+                order_email_html("Delivered! ✅",
+                    f"Your order was delivered to <b>{o.get('delivery_address')}</b>. Enjoy your farm-fresh goods, "
+                    f"and don't forget to leave a review!"))
     return await db.orders.find_one({"id": order_id}, {"_id": 0})
 
 @api_router.put("/orders/{order_id}/rider-location")
@@ -704,7 +742,25 @@ async def rider_update_location(order_id: str, data: RiderLocation, user: dict =
     now = datetime.now(timezone.utc).isoformat()
     await db.orders.update_one({"id": order_id},
         {"$set": {"rider_location": {"lat": data.lat, "lng": data.lng, "at": now}}})
+    if o.get("status") == "out_for_delivery" and not o.get("arriving_notified"):
+        dropoff = (o["delivery_lat"], o["delivery_lng"]) if o.get("delivery_lat") is not None else match_coords(o.get("delivery_address"))
+        if haversine((data.lat, data.lng), dropoff) < 1.5:
+            await db.orders.update_one({"id": order_id}, {"$set": {"arriving_notified": True}})
+            buyer = await db.users.find_one({"_id": ObjectId(o["buyer_id"])})
+            if buyer and buyer.get("email"):
+                await send_email(buyer["email"], f"Your FarmDirect order #{order_id[:8]} is arriving!",
+                    order_email_html("Almost there! 📍",
+                        "Your rider is less than 1.5 km away. Please get ready to receive your order."))
     return {"ok": True}
+
+@api_router.get("/rider/earnings")
+async def rider_earnings(user: dict = Depends(require_rider)):
+    uid = str(user["_id"])
+    orders = await db.orders.find({"rider.rider_user_id": uid}, {"_id": 0}).to_list(1000)
+    delivered = [o for o in orders if o.get("status") == "delivered"]
+    fees = round(sum(o.get("shipping_fee", 0) for o in delivered), 2)
+    active = len([o for o in orders if o.get("status") in ("rider_assigned", "out_for_delivery")])
+    return {"completed": len(delivered), "active": active, "fees_earned": fees, "assigned": len(orders)}
 
 @api_router.put("/orders/{order_id}/cancel")
 async def cancel_order(order_id: str, user: dict = Depends(get_current_user)):

@@ -4,7 +4,7 @@ import api, { peso, formatApiErrorDetail } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import DeliveryMap from "@/components/DeliveryMap";
 import { Button } from "@/components/ui/button";
-import { Bike, MapPin, Phone, Package, Navigation, CheckCircle2, Truck, Store } from "lucide-react";
+import { Bike, MapPin, Phone, Package, Navigation, CheckCircle2, Truck, Store, Wallet } from "lucide-react";
 import { toast } from "sonner";
 
 const STATUS_LABEL = { pending: "Pending", confirmed: "Confirmed", packed: "Packed", rider_assigned: "Rider Assigned", out_for_delivery: "Out for Delivery", delivered: "Delivered", ready_for_pickup: "Ready for Pickup", picked_up: "Picked Up", cancelled: "Cancelled" };
@@ -15,9 +15,13 @@ export default function RiderPortal() {
   const [orders, setOrders] = useState([]);
   const [busy, setBusy] = useState(false);
   const [sharing, setSharing] = useState(false);
+  const [earnings, setEarnings] = useState(null);
   const watchRef = useRef(null);
 
-  const load = () => api.get("/rider/orders").then((r) => setOrders(r.data));
+  const load = () => {
+    api.get("/rider/orders").then((r) => setOrders(r.data));
+    api.get("/rider/earnings").then((r) => setEarnings(r.data)).catch(() => {});
+  };
 
   useEffect(() => {
     if (loading) return;
@@ -71,6 +75,14 @@ export default function RiderPortal() {
           <Navigation size={16} className={sharing ? "animate-pulse" : ""} /> {sharing ? "Stop sharing" : "Share live location"}
         </Button>
       </div>
+
+      {earnings && (
+        <div className="grid grid-cols-3 gap-3 mb-6">
+          <div className="bg-card border border-border rounded-2xl p-4"><Package className="text-primary" size={20} /><div className="font-heading font-black text-2xl mt-1" data-testid="rider-completed">{earnings.completed}</div><div className="text-xs text-muted-foreground uppercase tracking-wider">Completed</div></div>
+          <div className="bg-card border border-border rounded-2xl p-4"><Truck className="text-accent" size={20} /><div className="font-heading font-black text-2xl mt-1" data-testid="rider-active">{earnings.active}</div><div className="text-xs text-muted-foreground uppercase tracking-wider">Active</div></div>
+          <div className="bg-primary text-primary-foreground rounded-2xl p-4"><Wallet size={20} /><div className="font-heading font-black text-2xl mt-1" data-testid="rider-fees">{peso(earnings.fees_earned)}</div><div className="text-xs text-primary-foreground/80 uppercase tracking-wider">Fees earned</div></div>
+        </div>
+      )}
 
       {orders.length === 0 ? (
         <div className="text-center py-24 text-muted-foreground"><Bike className="mx-auto mb-3 opacity-50" /><p>No deliveries assigned to you yet.</p></div>

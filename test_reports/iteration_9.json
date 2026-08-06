@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 9 (Rider Earnings cards + Buyer ETA badge + Resend email alerts) verified end-to-end on the frontend. All 4 requested flows PASS. (F1) Rider login rider.pedro@laguna.ph/rider123 lands on /rider — three earnings cards render at the top with correct testids: rider-completed=1, rider-active=1 (after starting delivery), rider-fees=₱103.00 (peso-formatted, non-negative). (F2) Assigned Pedro to seed order a736cdf7 as seller Kanor via /api/orders/{id}/assign-rider → start-delivery-<id> transitioned it to Out for Delivery via /api/orders/{id}/rider-status (rider portal showed the mark-delivered-<id> button). After PUT /rider-status status=delivered, rider earnings updated: completed 1→2, active 1→0 (verified via /api/rider/earnings). fees_earned did not increase for this specific order because the seed order had shipping_fee=null (not created through /checkout) — code path is correct: fees = sum(shipping_fee of delivered), so real checkout orders would accumulate. (F3) Buyer aling.nena@laguna.ph/buyer123 opened /orders, expanded the out_for_delivery order a736cdf7 — ETA badge eta-a736cdf7-... rendered next to 'Live delivery map' heading showing '~26 min · 9.5 km away' (computed by etaFrom in lib/laguna.js from rider location {14.24, 121.38} to Sta Cruz dropoff via matchCoords, at 22 km/h default). Badge correctly does NOT render on non-out_for_delivery orders. DeliveryMap still renders with H (dropoff) + R (rider) markers. (F4) Regressions clean: rider portal earnings + deliveries render, buyer live map still works, no console/runtime PAGEERR observed on Rider or Orders pages during flow (only one unrelated 405 from an OPTIONS/GET probe). GCash qr-missing-warning, checkout with shipping fee + map address, seller earnings, cancellation, delivered-only reviews were previously verified in iteration_8 and unaffected.",
+  "backend_issues": { "critical": [], "minor": [
+    {"endpoint": "/api/rider/earnings", "issue": "sum(o.get('shipping_fee', 0) for o in delivered) — if a delivered order has shipping_fee explicitly stored as null (as in some seed data), sum() will raise TypeError: unsupported operand +: int and NoneType. Safe fix: `sum((o.get('shipping_fee') or 0) for o in delivered)`. Not currently reproducible on live data (seed order a736cdf7 lacks the key entirely so .get returns 0), but a checkout that saved None would break the endpoint."}
+  ] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration7.py"
+  ],
+  "action_items": [
+    "(Minor) Harden /api/rider/earnings shipping_fee sum against null values: `sum((o.get('shipping_fee') or 0) for o in delivered)`."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 885 lines — even further past the 700-line threshold. Split into routers/ (auth, products, orders, rider, checkout, shipping, gcash, reviews, emails) is overdue.",
+    "Orders.jsx ETA computation calls matchCoords(delivery_address) as fallback when delivery_lat/lng are missing; for a seed order in 'Sta Cruz' this yielded a coarse municipal-centroid distance (~9.5km). That's acceptable but consider hiding the km precision (or showing '≈' prefix) when using a fallback centroid, because it can mislead buyers about accuracy.",
+    "GET /rider/earnings sums shipping_fee across ALL delivered orders assigned to this rider forever (no time window). If the product ever wants per-day/per-week earnings, add a period query param.",
+    "Orders.jsx polling on the expanded out_for_delivery order (5s) does not clear when the buyer collapses the card — the useEffect deps include `open` so it does clean up, actually OK — but it re-subscribes on every `orders` state change (dep array includes `orders`) causing the interval to be torn down and re-created on every 5s tick. Change deps to `[open]` and read `orders` via ref, OR filter by status inside the interval callback.",
+    "Rider earnings 'Active' card is derived from status=='out_for_delivery' filter; 'rider_assigned' orders that are NOT yet started are not counted as active. Consider whether that matches the product expectation (rider portal shows them under 'My Deliveries' either way).",
+    "Buyer email on out_for_delivery/arriving/delivered uses order.buyer_email fetched from user document — if a buyer has no email stored the Resend call should be a no-op. Verify send_email() short-circuits on missing recipient (not code-reviewed here)."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "100% (curl-verified by main agent; UI-triggered rider-status transitions also returned 200)", "frontend": "4/4 flows PASS" },
+  "test_credentials": "rider.pedro@laguna.ph/rider123, aling.nena@laguna.ph/buyer123, mang.kanor@laguna.ph/farmer123 — all working.",
+  "seed_data_creation": "Reused existing confirmed order a736cdf7-43bc-46b9-958a-cea2cf9a06ec (Nena → Kanor, delivery, cod). Assigned rider Pedro (rider_id 31629a65-6c9b-4e63-9383-98776352d440), transitioned to out_for_delivery, posted rider_location {14.24, 121.38}, then marked delivered to exercise the earnings uptick. Order is now 'delivered'. Pedro's earnings after this run: completed=2, active=0, fees_earned=₱103.00.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 9 is production-ready. If you need a fresh out_for_delivery order to re-verify the buyer ETA badge, pick any confirmed delivery order for seller Kanor from /api/orders (or create one through buyer checkout), then via API: (a) POST /auth/login as Kanor → PUT /orders/{id}/assign-rider {rider_id: Pedro's rider_id 31629a65-6c9b-4e63-9383-98776352d440}; (b) POST /auth/login as Pedro → PUT /orders/{id}/rider-status {status:'out_for_delivery'} then PUT /orders/{id}/rider-location {lat, lng near dropoff}; (c) view as buyer at /orders → expand card → eta-<id> badge appears. Backend auth uses httpOnly cookies (samesite=none, secure=true) — use a requests.Session and let cookies flow, don't Bearer-token.",
+  "rca of the issue": "N/A — no functional bugs found this iteration. Only one minor hardening opportunity noted for /api/rider/earnings null-safe shipping_fee summation."
+}
