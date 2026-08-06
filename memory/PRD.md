@@ -45,8 +45,17 @@ Build a Shopee-style marketplace for farmers (sellers) and buyers within Laguna 
 - P2: Real-time rider GPS (map currently animates a simulated route).
 
 ## Next Tasks
+- Split server.py into routers/ (now ~885 lines — overdue).
 - Refund flow for paid online/GCash orders.
-- Split server.py into routers (now ~828 lines).
+
+## Implemented (2026-06, iteration 7 — ETA, Rider earnings, Email alerts)
+- Delivery ETA: buyer sees "~N min · K km away" on out-for-delivery orders, computed from rider live location to drop-off (lib/laguna etaFrom, 22km/h). [done]
+- Rider earnings: /rider portal cards for Completed, Active, Fees earned (GET /api/rider/earnings, null-safe). [done]
+- Email alerts (Resend managed): buyer emailed on out_for_delivery ("on the way"), arriving (<1.5km, once), and delivered. send_email/order_email_html; EMERGENT_EMAIL_KEY in .env. [done]
+- Hardened Orders live-poll (deps [open], self-clears on terminal status). Tested iteration_9: 4/4 frontend flows, backend chain verified, emails send with no errors.
+
+## Pending on user input
+- PayMongo GCash auto-verify code is complete but DORMANT — user must paste a real PAYMONGO_SECRET_KEY (sk_test_...) + webhook secret to activate; GCash stays manual until then.
 
 ## Implemented (2026-06, iteration 6 — Rider role, live tracking, accurate address, QR warning)
 - Accurate checkout address: MapPicker reverse-geocodes pin/location (Nominatim) and auto-fills the delivery address; "Use my location" via browser geolocation. [done]

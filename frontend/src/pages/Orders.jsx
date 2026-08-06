@@ -22,13 +22,17 @@ export default function Orders() {
 
   useEffect(() => {
     if (!open) return;
-    const o = orders.find((x) => x.id === open);
-    if (!o || o.status !== "out_for_delivery") return;
+    const current = orders.find((x) => x.id === open);
+    if (!current || current.status !== "out_for_delivery") return;
     const poll = setInterval(() => {
-      api.get(`/orders/${open}`).then((r) => setOrders((prev) => prev.map((x) => x.id === open ? r.data : x))).catch(() => {});
+      api.get(`/orders/${open}`).then((r) => {
+        setOrders((prev) => prev.map((x) => x.id === open ? r.data : x));
+        if (r.data.status !== "out_for_delivery") clearInterval(poll);
+      }).catch(() => {});
     }, 5000);
     return () => clearInterval(poll);
-  }, [open, orders]);
+    // eslint-disable-next-line
+  }, [open]);
 
   const cancel = async (id) => {
     try { await api.put(`/orders/${id}/cancel`); toast.success("Order cancelled & stock restored"); load(); }

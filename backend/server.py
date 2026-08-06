@@ -758,7 +758,7 @@ async def rider_earnings(user: dict = Depends(require_rider)):
     uid = str(user["_id"])
     orders = await db.orders.find({"rider.rider_user_id": uid}, {"_id": 0}).to_list(1000)
     delivered = [o for o in orders if o.get("status") == "delivered"]
-    fees = round(sum(o.get("shipping_fee", 0) for o in delivered), 2)
+    fees = round(sum((o.get("shipping_fee") or 0) for o in delivered), 2)
     active = len([o for o in orders if o.get("status") in ("rider_assigned", "out_for_delivery")])
     return {"completed": len(delivered), "active": active, "fees_earned": fees, "assigned": len(orders)}
 
