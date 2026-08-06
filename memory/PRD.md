@@ -45,9 +45,15 @@ Build a Shopee-style marketplace for farmers (sellers) and buyers within Laguna 
 - P2: Real-time rider GPS (map currently animates a simulated route).
 
 ## Next Tasks
-- Ratings/reviews for sellers and products.
-- Seller payouts/earnings breakdown view.
-- Refund flow for paid online orders.
+- Refund flow for paid online/GCash orders.
+- Split server.py into routers (approaching 700 lines).
+
+## Implemented (2026-06, iteration 4 — PayMongo auto-verify, Reviews, Earnings)
+- PayMongo GCash auto-verify (Hosted Checkout V2 + signed webhook /api/webhook/paymongo) wired but DORMANT until PAYMONGO_SECRET_KEY + PAYMONGO_WEBHOOK_SECRET set. When empty, GCash uses the manual seller-QR flow. gcash_mode="auto"|"manual" on orders; GcashPayment page polls status in auto mode. Central collection (owner account). [done, awaiting keys]
+- Ratings & Reviews: buyers review purchased products (POST /api/products/{id}/reviews, 1-5 + comment, one per buyer/product), product rating_avg/count denormalized, seller_rating on product detail, star ratings on cards + detail + seller products, reviews list + form. [done]
+- Seller Earnings tab: income breakdown Card/Online + GCash + Cash, total, pending, per-order table (GET /api/seller/earnings). [done]
+- Tested iteration_6: 100% frontend flows, backend 25/26 (1 pre-existing Stripe <₱25 min-amount edge case).
+- KNOWN: to enable auto-verify, add PayMongo test keys to backend/.env and register webhook URL {backend}/api/webhook/paymongo for event checkout_session.payment.paid.
 
 ## Implemented (2026-06, iteration 3 — GCash)
 - GCash manual payment: sellers save GCash name/number + optional uploaded GCash QR (PUT /api/seller/gcash). [done]
