@@ -22,11 +22,17 @@ export default function ProductDetail() {
   const [myRating, setMyRating] = useState(0);
   const [comment, setComment] = useState("");
   const [posting, setPosting] = useState(false);
+  const [eligible, setEligible] = useState({ can_review: false, already_reviewed: false });
 
   const loadProduct = () => api.get(`/products/${id}`).then((r) => setProduct(r.data)).catch(() => navigate("/market"));
   const loadReviews = () => api.get(`/products/${id}/reviews`).then((r) => setReviews(r.data));
+  const loadEligibility = () => {
+    if (user && user.role === "buyer") api.get(`/products/${id}/can-review`).then((r) => setEligible(r.data)).catch(() => {});
+    else setEligible({ can_review: false, already_reviewed: false });
+  };
 
   useEffect(() => { loadProduct(); loadReviews(); /* eslint-disable-next-line */ }, [id]);
+  useEffect(() => { loadEligibility(); /* eslint-disable-next-line */ }, [id, user]);
 
   if (!product) return <div className="max-w-5xl mx-auto px-4 py-20 text-center text-muted-foreground">Loading…</div>;
   const out = product.stock <= 0;
@@ -38,7 +44,7 @@ export default function ProductDetail() {
       await api.post(`/products/${id}/reviews`, { rating: myRating, comment });
       toast.success("Thanks for your review!");
       setComment(""); setMyRating(0);
-      loadProduct(); loadReviews();
+      loadProduct(); loadReviews(); loadEligibility();
     } catch (err) {
       toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Could not post review");
     } finally { setPosting(false); }
@@ -88,13 +94,19 @@ export default function ProductDetail() {
       <div className="mt-12">
         <h2 className="font-heading font-black text-2xl tracking-tight">Ratings & Reviews</h2>
 
-        {user && user.role === "buyer" && (
+        {user && user.role === "buyer" && eligible.can_review && (
           <div className="mt-4 bg-card border border-border rounded-2xl p-6">
-            <div className="font-heading font-bold">Leave a review</div>
-            <p className="text-xs text-muted-foreground mb-3">You can review products you've ordered.</p>
+            <div className="font-heading font-bold">{eligible.already_reviewed ? "Update your review" : "Leave a review"}</div>
+            <p className="text-xs text-muted-foreground mb-3">Your order was delivered — share how the produce was.</p>
             <StarRating value={myRating} onRate={setMyRating} size={26} showEmpty={false} />
             <Textarea data-testid="review-comment" value={comment} onChange={(e) => setComment(e.target.value)} className="mt-3" placeholder="How was the produce? (optional)" />
-            <Button data-testid="submit-review-btn" onClick={submitReview} disabled={posting} className="mt-3 rounded-full bg-accent hover:bg-accent/90 text-accent-foreground">{posting ? "Posting…" : "Post review"}</Button>
+            <Button data-testid="submit-review-btn" onClick={submitReview} disabled={posting} className="mt-3 rounded-full bg-accent hover:bg-accent/90 text-accent-foreground">{posting ? "Posting…" : eligible.already_reviewed ? "Update review" : "Post review"}</Button>
+          </div>
+        )}
+
+        {user && user.role === "buyer" && !eligible.can_review && (
+          <div className="mt-4 bg-secondary/50 border border-border rounded-2xl p-4 text-sm text-muted-foreground" data-testid="review-locked-note">
+            You can rate this product once your order has been delivered or picked up.
           </div>
         )}
 

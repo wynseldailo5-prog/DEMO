@@ -285,14 +285,20 @@ async def get_product(product_id: str):
 async def list_reviews(product_id: str):
     return await db.reviews.find({"product_id": product_id}, {"_id": 0}).sort("created_at", -1).to_list(500)
 
+@api_router.get("/products/{product_id}/can-review")
+async def can_review(product_id: str, user: dict = Depends(get_current_user)):
+    delivered = await db.orders.find_one({"buyer_id": str(user["_id"]), "items.product_id": product_id, "status": {"$in": ["delivered", "picked_up"]}})
+    reviewed = await db.reviews.find_one({"product_id": product_id, "buyer_id": str(user["_id"])})
+    return {"can_review": bool(delivered), "already_reviewed": bool(reviewed)}
+
 @api_router.post("/products/{product_id}/reviews")
 async def add_review(product_id: str, data: ReviewInput, user: dict = Depends(get_current_user)):
     product = await db.products.find_one({"id": product_id})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    purchased = await db.orders.find_one({"buyer_id": str(user["_id"]), "items.product_id": product_id})
+    purchased = await db.orders.find_one({"buyer_id": str(user["_id"]), "items.product_id": product_id, "status": {"$in": ["delivered", "picked_up"]}})
     if not purchased:
-        raise HTTPException(status_code=403, detail="You can review only products you've ordered")
+        raise HTTPException(status_code=403, detail="You can review a product only after your order has been delivered")
     now = datetime.now(timezone.utc).isoformat()
     existing = await db.reviews.find_one({"product_id": product_id, "buyer_id": str(user["_id"])})
     if existing:
