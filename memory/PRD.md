@@ -46,7 +46,13 @@ Build a Shopee-style marketplace for farmers (sellers) and buyers within Laguna 
 
 ## Next Tasks
 - Refund flow for paid online/GCash orders.
-- Split server.py into routers (approaching 700 lines).
+- Split server.py into routers (now ~785 lines).
+
+## Implemented (2026-06, iteration 5 — Shipping fee, Temporary riders, Delivery-gated reviews)
+- Reviews now require the buyer's order to be delivered/picked_up (GET /api/products/{id}/can-review gates the UI form). [done]
+- Shipping fee on delivery orders: distance-based (Lalamove-style ₱49 base + ₱6/km ≤5km then ₱5/km) via haversine between seller town and drop-off; pickup = free. POST /api/shipping-quote for live checkout estimate; orders store subtotal/shipping_fee/total. [done]
+- Sellers can assign a TEMPORARY custom rider (name/phone/vehicle) per delivery order (PUT /api/orders/{id}/assign-custom-rider) — not saved to riders list, shown on the order + delivery history with a "(temp)" marker. [done]
+- Tested iteration_7: 100% backend (7/7) + 100% frontend flows.
 
 ## Implemented (2026-06, iteration 4 — PayMongo auto-verify, Reviews, Earnings)
 - PayMongo GCash auto-verify (Hosted Checkout V2 + signed webhook /api/webhook/paymongo) wired but DORMANT until PAYMONGO_SECRET_KEY + PAYMONGO_WEBHOOK_SECRET set. When empty, GCash uses the manual seller-QR flow. gcash_mode="auto"|"manual" on orders; GcashPayment page polls status in auto mode. Central collection (owner account). [done, awaiting keys]
