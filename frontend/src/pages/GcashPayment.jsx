@@ -5,7 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Wallet, Copy, CheckCircle2, ArrowLeft, Loader2 } from "lucide-react";
+import { Wallet, Copy, CheckCircle2, ArrowLeft, Loader2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
 export default function GcashPayment() {
@@ -98,7 +98,12 @@ export default function GcashPayment() {
           <div className="text-center">
             <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Scan to pay in your GCash app</div>
             <img data-testid="gcash-qr-img" src={qrSrc} alt="GCash QR" className="mx-auto h-52 w-52 rounded-2xl border border-border object-contain bg-white p-2" />
-            {!info.qr_url && <p className="text-[11px] text-muted-foreground mt-2">Seller hasn't uploaded their GCash QR — send manually to the number below.</p>}
+            {!info.qr_url && (
+              <div data-testid="qr-missing-warning" className="mt-3 flex items-start gap-2 rounded-xl border border-amber-400 bg-amber-50 text-amber-800 p-3 text-left text-xs">
+                <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                <span><span className="font-semibold">No official GCash QR from this seller.</span> The code above is auto-generated for reference only and may not scan for payment — please send manually to the GCash number below and keep your receipt.</span>
+              </div>
+            )}
           </div>
 
           <div className="rounded-2xl bg-secondary/50 p-4 space-y-3">

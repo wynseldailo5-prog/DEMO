@@ -169,6 +169,11 @@ async def require_seller(user: dict = Depends(get_current_user)) -> dict:
         raise HTTPException(status_code=403, detail="Seller access required")
     return user
 
+async def require_rider(user: dict = Depends(get_current_user)) -> dict:
+    if user.get("role") != "rider":
+        raise HTTPException(status_code=403, detail="Rider access required")
+    return user
+
 # ----------------------- Models -----------------------
 class RegisterInput(BaseModel):
     email: EmailStr
@@ -178,6 +183,7 @@ class RegisterInput(BaseModel):
     phone: Optional[str] = None
     address: Optional[str] = None
     farm_name: Optional[str] = None
+    vehicle: Optional[str] = None
 
 class LoginInput(BaseModel):
     email: EmailStr
@@ -243,6 +249,10 @@ class ShippingQuoteInput(BaseModel):
     delivery_lng: Optional[float] = None
     delivery_address: str = ""
 
+class RiderLocation(BaseModel):
+    lat: float
+    lng: float
+
 ORDER_STAGES = ["pending", "confirmed", "packed", "rider_assigned", "out_for_delivery", "delivered", "ready_for_pickup", "picked_up", "cancelled"]
 
 # ----------------------- Auth routes -----------------------
@@ -251,12 +261,18 @@ async def register(data: RegisterInput, response: Response):
     email = data.email.lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email already registered")
-    role = data.role if data.role in ("buyer", "seller") else "buyer"
+    role = data.role if data.role in ("buyer", "seller", "rider") else "buyer"
     doc = {"email": email, "password_hash": hash_password(data.password), "name": data.name,
            "role": role, "phone": data.phone, "address": data.address, "farm_name": data.farm_name,
            "created_at": datetime.now(timezone.utc).isoformat()}
     result = await db.users.insert_one(doc)
     doc["_id"] = result.inserted_id
+    if role == "rider":
+        coords = match_coords(data.address)
+        await db.riders.insert_one({"id": str(uuid.uuid4()), "rider_user_id": str(result.inserted_id),
+                                    "name": data.name, "phone": data.phone or "",
+                                    "vehicle": data.vehicle or "Motorcycle",
+                                    "zone": data.address or "Laguna", "lat": coords[0], "lng": coords[1]})
     token = create_access_token(str(result.inserted_id), email)
     response.set_cookie("access_token", token, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
     return {"token": token, "user": serialize_user(doc)}
@@ -661,6 +677,34 @@ async def shipping_quote(data: ShippingQuoteInput):
         dropoff = match_coords(data.delivery_address)
     dist = haversine(pickup, dropoff)
     return {"shipping_fee": fee_from_distance(dist), "distance_km": round(dist, 1)}
+
+@api_router.get("/rider/orders")
+async def rider_orders(user: dict = Depends(require_rider)):
+    uid = str(user["_id"])
+    return await db.orders.find({"rider.rider_user_id": uid}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+@api_router.put("/orders/{order_id}/rider-status")
+async def rider_update_status(order_id: str, data: StatusUpdate, user: dict = Depends(require_rider)):
+    if data.status not in ("out_for_delivery", "delivered"):
+        raise HTTPException(status_code=400, detail="Riders can only mark Out for Delivery or Delivered")
+    o = await db.orders.find_one({"id": order_id})
+    if not o or (o.get("rider") or {}).get("rider_user_id") != str(user["_id"]):
+        raise HTTPException(status_code=403, detail="Not your delivery")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.orders.update_one({"id": order_id},
+        {"$set": {"status": data.status, "updated_at": now},
+         "$push": {"history": {"status": data.status, "at": now}}})
+    return await db.orders.find_one({"id": order_id}, {"_id": 0})
+
+@api_router.put("/orders/{order_id}/rider-location")
+async def rider_update_location(order_id: str, data: RiderLocation, user: dict = Depends(require_rider)):
+    o = await db.orders.find_one({"id": order_id})
+    if not o or (o.get("rider") or {}).get("rider_user_id") != str(user["_id"]):
+        raise HTTPException(status_code=403, detail="Not your delivery")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.orders.update_one({"id": order_id},
+        {"$set": {"rider_location": {"lat": data.lat, "lng": data.lng, "at": now}}})
+    return {"ok": True}
 
 @api_router.put("/orders/{order_id}/cancel")
 async def cancel_order(order_id: str, user: dict = Depends(get_current_user)):

@@ -107,8 +107,8 @@ export default function Checkout() {
                   <div><Label>Delivery address (Laguna)</Label><Textarea data-testid="address-field" value={address} onChange={(e) => setAddress(e.target.value)} className="mt-1.5" placeholder="House no., Barangay, Municipality, Laguna" /></div>
                   <div>
                     <Label>Pin your location on the map (optional)</Label>
-                    <p className="text-xs text-muted-foreground mb-1.5">Tap the map to drop a pin for the rider.</p>
-                    <MapPicker value={pin} onChange={setPin} />
+                    <p className="text-xs text-muted-foreground mb-1.5">Tap the map or use “Use my location” — the address auto-fills for accuracy.</p>
+                    <MapPicker value={pin} onChange={(v) => { setPin(v); if (v.address) setAddress(v.address); }} />
                     {pin && <p className="text-xs text-muted-foreground mt-1.5" data-testid="pin-coords">Pinned: {pin.lat}, {pin.lng}</p>}
                   </div>
                 </>

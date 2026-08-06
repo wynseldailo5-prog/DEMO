@@ -34,16 +34,21 @@ export default function DeliveryMap({ order, height = 260 }) {
     } else {
       window.L.marker([dropoff.lat, dropoff.lng], { icon: pin("#E07A5F", "H") }).addTo(map).bindPopup("Delivery address");
       const origin = order.rider?.lat != null ? { lat: order.rider.lat, lng: order.rider.lng } : LAGUNA_CENTER;
+      const live = order.rider_location;
       if (order.rider) {
         const line = window.L.polyline([[origin.lat, origin.lng], [dropoff.lat, dropoff.lng]], { color: "#2D5A40", weight: 3, dashArray: "6 8", opacity: 0.7 }).addTo(map);
         map.fitBounds(line.getBounds().pad(0.3));
-        const riderMarker = window.L.marker([origin.lat, origin.lng], { icon: pin("#2D5A40", "R") }).addTo(map).bindPopup(`${order.rider.name}<br>${order.rider.vehicle}`);
+        const startPos = live ? [live.lat, live.lng] : [origin.lat, origin.lng];
+        const riderMarker = window.L.marker(startPos, { icon: pin("#2D5A40", "R") }).addTo(map).bindPopup(`${order.rider.name}<br>${order.rider.vehicle || ""}${live ? "<br><b>Live location</b>" : ""}`);
 
-        if (order.status === "out_for_delivery") {
+        if (live) {
+          // real-time rider location provided; keep marker at live position
+          riderMarker.setLatLng([live.lat, live.lng]);
+        } else if (order.status === "out_for_delivery") {
           let t = 0;
           const step = () => {
             t += 0.004;
-            const p = (Math.sin(t * Math.PI - Math.PI / 2) + 1) / 2; // ease loop 0->1->0
+            const p = (Math.sin(t * Math.PI - Math.PI / 2) + 1) / 2;
             const lat = origin.lat + (dropoff.lat - origin.lat) * p;
             const lng = origin.lng + (dropoff.lng - origin.lng) * p;
             riderMarker.setLatLng([lat, lng]);
@@ -58,7 +63,7 @@ export default function DeliveryMap({ order, height = 260 }) {
     const invalidateTimer = setTimeout(() => { try { map.invalidateSize(); } catch (_) {} }, 250);
     return () => { clearTimeout(invalidateTimer); if (rafRef.current) cancelAnimationFrame(rafRef.current); map.remove(); };
     // eslint-disable-next-line
-  }, [order.id, order.status, order.rider?.id]);
+  }, [order.id, order.status, order.rider?.id, order.rider_location?.at]);
 
   return <div ref={ref} data-testid="delivery-map" style={{ height }} className="rounded-xl overflow-hidden border border-border relative" />;
 }

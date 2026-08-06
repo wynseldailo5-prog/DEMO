@@ -1,0 +1,34 @@
+{
+  "summary": "Iteration 8 (rider role + portal + real-time tracking + accurate checkout address + GCash QR-missing warning) verified end-to-end on the frontend. All 6 requested flows pass. (F1) Rider login rider.pedro@laguna.ph/rider123 lands on /rider — 'My Deliveries' shows 1 assigned order f9f5e49d (Out for Delivery) with rider-address-<id>='Los Baños, Laguna', Google Maps directions link (google.com/maps/dir), buyer phone/name, and DeliveryMap. mark-delivered-<id> button visible for out_for_delivery status. (F2) share-location-btn click did not crash the page (headless geolocation unavailable — button remained functional). (F3) Registered brand-new rider via /register (role-rider selector shows Buyer/Farmer/Rider; vehicle-input and address-input appear when rider selected). Post-signup navigation → /rider showing 'No deliveries assigned to you yet.' (F4) Buyer aling.nena expanded the out_for_delivery order — delivery-map rendered with 2 leaflet markers (dropoff H + rider R). Buyer Orders page polls every 5s (Orders.jsx L22-30). (F5) /checkout with 'Deliver to me' + map-picker + locate-me-btn: clicking the map dropped a pin (pin-coords='14.203151, 121.224473'), reverse-geocoded via Nominatim and auto-filled the address textarea with 'Los Baños, Laguna, Calabarzon, Philippines'. checkout-shipping updated from ₱115.00 → ₱175.00 after new pin; switching to pickup showed 'Free (pickup)', switching back restored ₱175.00. (F6) /gcash-pay/<Kanor order> shows the amber qr-missing-warning block containing 'No official GCash QR from this seller. The code above is auto-generated for reference only...' as required for seller Kanor (info.qr_url absent). No page/runtime errors on RiderPortal, Orders, Checkout, or GcashPayment. Backend rider chain was already curl-verified by main agent.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Checkout MapPicker", "issues": ["Occasionally two transient PAGE-ERR 'Cannot read properties of undefined (_leaflet_pos)' logged when the leaflet map is clicked before tiles finish loading. No user-visible impact — pin still drops, address still auto-fills, and shipping fee still updates. Consider guarding the click handler until map load event fires."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration7.py",
+    "/app/test_reports/pytest/iter7.xml"
+  ],
+  "action_items": [
+    "(Optional) Suppress the harmless leaflet _leaflet_pos error during initial map load by ignoring click events until map.whenReady() fires in MapPicker.jsx."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 828 lines (still past the 700-line split threshold). Splitting into routers/ (auth, products, orders, rider, checkout, shipping, gcash, reviews) is overdue.",
+    "RiderPortal `toggleShare` posts rider-location for every active order on every geolocation tick with no throttling — could hammer the API on a fast-moving GPS. Consider min interval (e.g., 3-5s) between PUTs.",
+    "Nominatim reverse geocode call in MapPicker.jsx has no debounce and runs on every map click; rapid clicks can trigger Nominatim's rate limit (1 req/s). Debounce or cancel in-flight requests.",
+    "MapPicker click handler races with map initialization → intermittent '_leaflet_pos' console errors. Wrap map.on('click', ...) inside map.whenReady().",
+    "GcashPayment.jsx qrSrc fallback `${API}/gcash-qr/${orderId}` is only sensible when the seller intentionally has no QR — good that the amber warning now clarifies that to buyers. Consider disabling scanning UI text ('Scan to pay in your GCash app') when info.qr_url is missing since it may confuse users.",
+    "Orders.jsx poll runs every 5s per open expanded order but doesn't cancel when the status transitions to 'delivered' — harmless but wasteful (would keep polling forever if user leaves the card open). Add a guard to clear interval when new status !== 'out_for_delivery'."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "100% (curl chain already verified by main agent)", "frontend": "6/6 flows PASS" },
+  "test_credentials": "rider.pedro@laguna.ph/rider123, aling.nena@laguna.ph/buyer123, mang.kanor@laguna.ph/farmer123 — all working.",
+  "seed_data_creation": "Registered TEST rider test_rider_1785994062@test.ph (rider role) via UI; created GCash manual order bafee57e-ff60-41f0-82d9-92c127d03b02 (buyer Nena → Kanor's Sweet Camote, delivery, gcash) to exercise qr-missing-warning. Pedro's order f9f5e49d remains at Out for Delivery (did NOT mark it delivered so buyer live-tracking flow stays testable).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 8 is production-ready. If a future test needs a 'rider_assigned' order to exercise start-delivery-<id>, seller Kanor can be logged in and assigned to the (fresh) delivery order via SellerDashboard's assign-rider dropdown; that transitions status to rider_assigned so the Start delivery button appears in RiderPortal for Pedro. Pedro's current order is already out_for_delivery, so only mark-delivered was validated dynamically; start-delivery button rendering is code-verified in RiderPortal.jsx line 100.",
+  "rca of the issue": "N/A — no functional bugs found this iteration. Only minor cosmetic console noise from leaflet click racing map init (guard suggestion above)."
+}

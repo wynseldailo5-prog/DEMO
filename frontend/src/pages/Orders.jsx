@@ -19,6 +19,16 @@ export default function Orders() {
   const load = () => api.get("/orders").then((r) => setOrders(r.data)).finally(() => setLoading(false));
   useEffect(() => { if (user) load(); }, [user]);
 
+  useEffect(() => {
+    if (!open) return;
+    const o = orders.find((x) => x.id === open);
+    if (!o || o.status !== "out_for_delivery") return;
+    const poll = setInterval(() => {
+      api.get(`/orders/${open}`).then((r) => setOrders((prev) => prev.map((x) => x.id === open ? r.data : x))).catch(() => {});
+    }, 5000);
+    return () => clearInterval(poll);
+  }, [open, orders]);
+
   const cancel = async (id) => {
     try { await api.put(`/orders/${id}/cancel`); toast.success("Order cancelled & stock restored"); load(); }
     catch (err) { toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Cannot cancel"); }

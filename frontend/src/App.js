@@ -14,6 +14,7 @@ import PaymentResult from "@/pages/PaymentResult";
 import GcashPayment from "@/pages/GcashPayment";
 import Orders from "@/pages/Orders";
 import SellerDashboard from "@/pages/SellerDashboard";
+import RiderPortal from "@/pages/RiderPortal";
 
 function App() {
   return (
@@ -35,6 +36,7 @@ function App() {
               <Route path="/gcash-pay/:orderId" element={<GcashPayment />} />
               <Route path="/orders" element={<Orders />} />
               <Route path="/seller" element={<SellerDashboard />} />
+              <Route path="/rider" element={<RiderPortal />} />
             </Routes>
             <Toaster position="top-right" richColors />
           </BrowserRouter>

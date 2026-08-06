@@ -5,7 +5,7 @@ import { formatApiErrorDetail } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Sprout, ShoppingBasket } from "lucide-react";
+import { Sprout, ShoppingBasket, Bike } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Auth({ mode }) {
@@ -13,7 +13,7 @@ export default function Auth({ mode }) {
   const { login, register } = useAuth();
   const navigate = useNavigate();
   const [role, setRole] = useState("buyer");
-  const [form, setForm] = useState({ email: "", password: "", name: "", phone: "", address: "", farm_name: "" });
+  const [form, setForm] = useState({ email: "", password: "", name: "", phone: "", address: "", farm_name: "", vehicle: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -26,11 +26,11 @@ export default function Auth({ mode }) {
       if (isLogin) {
         const u = await login(form.email, form.password);
         toast.success(`Welcome back, ${u.name}!`);
-        navigate(u.role === "seller" ? "/seller" : "/market");
+        navigate(u.role === "seller" ? "/seller" : u.role === "rider" ? "/rider" : "/market");
       } else {
         const u = await register({ ...form, role });
         toast.success("Account created!");
-        navigate(role === "seller" ? "/seller" : "/market");
+        navigate(role === "seller" ? "/seller" : role === "rider" ? "/rider" : "/market");
       }
     } catch (err) {
       setError(formatApiErrorDetail(err.response?.data?.detail) || err.message);
@@ -44,8 +44,8 @@ export default function Auth({ mode }) {
         <p className="text-sm text-muted-foreground mt-1">{isLogin ? "Sign in to shop or manage your farm." : "Join FarmDirect Laguna today."}</p>
 
         {!isLogin && (
-          <div className="grid grid-cols-2 gap-3 mt-6">
-            {[{ v: "buyer", i: ShoppingBasket, l: "I'm a Buyer" }, { v: "seller", i: Sprout, l: "I'm a Farmer" }].map((r) => (
+          <div className="grid grid-cols-3 gap-2 mt-6">
+            {[{ v: "buyer", i: ShoppingBasket, l: "Buyer" }, { v: "seller", i: Sprout, l: "Farmer" }, { v: "rider", i: Bike, l: "Rider" }].map((r) => (
               <button key={r.v} type="button" data-testid={`role-${r.v}`} onClick={() => setRole(r.v)}
                 className={`flex flex-col items-center gap-1.5 py-4 rounded-2xl border-2 transition-colors ${role === r.v ? "border-primary bg-secondary" : "border-border hover:border-primary/40"}`}>
                 <r.i size={22} className={role === r.v ? "text-primary" : "text-muted-foreground"} />
@@ -65,6 +65,7 @@ export default function Auth({ mode }) {
             <>
               <div><Label>Phone</Label><Input data-testid="phone-input" value={form.phone} onChange={set("phone")} className="mt-1.5" placeholder="0917-xxx-xxxx" /></div>
               {role === "seller" && <div><Label>Farm / Stall name</Label><Input data-testid="farm-input" value={form.farm_name} onChange={set("farm_name")} className="mt-1.5" placeholder="Dela Cruz Farm" /></div>}
+              {role === "rider" && <div><Label>Vehicle</Label><Input data-testid="vehicle-input" value={form.vehicle} onChange={set("vehicle")} className="mt-1.5" placeholder="Motorcycle / Tricycle" /></div>}
               <div><Label>Address (Laguna)</Label><Input data-testid="address-input" value={form.address} onChange={set("address")} className="mt-1.5" placeholder="Brgy., Municipality" /></div>
             </>
           )}

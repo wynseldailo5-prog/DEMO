@@ -31,6 +31,7 @@ export default function Navbar() {
           {link("/market", "Market")}
           {user && link("/orders", "Orders")}
           {user && (user.role === "seller" || user.role === "admin") && link("/seller", "Sell")}
+          {user && user.role === "rider" && link("/rider", "Deliveries")}
         </nav>
 
         <div className="flex items-center gap-3">
