@@ -8,8 +8,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import MapPicker from "@/components/MapPicker";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { MUNICIPALITIES, matchCoords, haversineKm } from "@/lib/laguna";
 import { CreditCard, Banknote, MapPin, Truck, Store, Wallet } from "lucide-react";
 import { toast } from "sonner";
+
+const LAGUNA_TOWNS = Object.keys(MUNICIPALITIES);
 
 export default function Checkout() {
   const { items, total, clear } = useCart();
@@ -17,23 +21,26 @@ export default function Checkout() {
   const navigate = useNavigate();
   const [fulfillment, setFulfillment] = useState("delivery");
   const [method, setMethod] = useState("online");
-  const [address, setAddress] = useState(user?.address || "");
+  const [municipality, setMunicipality] = useState("");
+  const [detail, setDetail] = useState(user?.address || "");
   const [phone, setPhone] = useState(user?.phone || "");
   const [pin, setPin] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const placed = useRef(false);
   const [shippingFee, setShippingFee] = useState(0);
+  const [localRate, setLocalRate] = useState(false);
 
   const pickupLocation = items[0]?.location || "Laguna";
+  const address = [detail.trim(), municipality, municipality ? "Laguna" : ""].filter(Boolean).join(", ");
 
   useEffect(() => { if (loading || placed.current) return; if (!user) navigate("/login"); else if (items.length === 0) navigate("/market"); }, [user, loading, items, navigate]);
 
   useEffect(() => {
-    if (fulfillment === "pickup" || items.length === 0) { setShippingFee(0); return; }
+    if (fulfillment === "pickup" || items.length === 0) { setShippingFee(0); setLocalRate(false); return; }
     const t = setTimeout(() => {
       api.post("/shipping-quote", { fulfillment_type: "delivery", product_id: items[0].product_id,
         delivery_lat: pin?.lat, delivery_lng: pin?.lng, delivery_address: address })
-        .then((r) => setShippingFee(r.data.shipping_fee)).catch(() => {});
+        .then((r) => { setShippingFee(r.data.shipping_fee); setLocalRate(!!r.data.local_rate); }).catch(() => {});
     }, 500);
     return () => clearTimeout(t);
   }, [fulfillment, pin, address, items]);
@@ -42,7 +49,8 @@ export default function Checkout() {
 
   const submit = async () => {
     if (!phone.trim()) { toast.error("Please provide a contact phone."); return; }
-    if (fulfillment === "delivery" && !address.trim()) { toast.error("Please fill in your delivery address."); return; }
+    if (fulfillment === "delivery" && !municipality) { toast.error("Please select your Laguna municipality."); return; }
+    if (fulfillment === "delivery" && !detail.trim()) { toast.error("Please add your house no. / barangay."); return; }
     setSubmitting(true);
     try {
       const payload = {
@@ -104,11 +112,19 @@ export default function Checkout() {
             <div className="mt-4 space-y-4">
               {fulfillment === "delivery" ? (
                 <>
-                  <div><Label>Delivery address (Laguna)</Label><Textarea data-testid="address-field" value={address} onChange={(e) => setAddress(e.target.value)} className="mt-1.5" placeholder="House no., Barangay, Municipality, Laguna" /></div>
+                  <div>
+                    <Label>Municipality (Laguna)</Label>
+                    <Select value={municipality} onValueChange={setMunicipality}>
+                      <SelectTrigger data-testid="municipality-select" className="mt-1.5"><SelectValue placeholder="Select your town" /></SelectTrigger>
+                      <SelectContent>{LAGUNA_TOWNS.map((t) => <SelectItem key={t} value={t} data-testid={`municipality-${t}`}>{t}</SelectItem>)}</SelectContent>
+                    </Select>
+                    {localRate && <p className="text-xs text-primary font-medium mt-1.5" data-testid="local-rate-note">✓ Same town as the seller — you get the cheaper local rate!</p>}
+                  </div>
+                  <div><Label>House no. / Barangay / Street</Label><Textarea data-testid="address-field" value={detail} onChange={(e) => setDetail(e.target.value)} className="mt-1.5" placeholder="e.g. 12 Mabini St., Brgy. San Jose" /></div>
                   <div>
                     <Label>Pin your location on the map (optional)</Label>
-                    <p className="text-xs text-muted-foreground mb-1.5">Tap the map or use “Use my location” — the address auto-fills for accuracy.</p>
-                    <MapPicker value={pin} onChange={(v) => { setPin(v); if (v.address) setAddress(v.address); }} />
+                    <p className="text-xs text-muted-foreground mb-1.5">Tap the map or use “Use my location” for a more accurate drop-off.</p>
+                    <MapPicker value={pin} onChange={(v) => { setPin(v); if (v.address) setDetail(v.address); }} />
                     {pin && <p className="text-xs text-muted-foreground mt-1.5" data-testid="pin-coords">Pinned: {pin.lat}, {pin.lng}</p>}
                   </div>
                 </>

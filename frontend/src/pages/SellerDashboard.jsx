@@ -35,6 +35,8 @@ export default function SellerDashboard() {
   const [uploading, setUploading] = useState(false);
   const [gcashUploading, setGcashUploading] = useState(false);
   const [gcash, setGcash] = useState({ gcash_number: "", gcash_name: "", gcash_qr_url: null });
+  const [stockFor, setStockFor] = useState(null);
+  const [stockVal, setStockVal] = useState("");
   const [form, setForm] = useState({ name: "", description: "", category: "Vegetables", price: "", unit: "kg", stock: "", location: "Laguna", image_url: null });
   const fileRef = useRef();
   const qrRef = useRef();
@@ -81,6 +83,12 @@ export default function SellerDashboard() {
   };
 
   const del = async (id) => { await api.delete(`/products/${id}`); toast.success("Removed"); loadAll(); };
+  const saveStock = async () => {
+    const val = parseInt(stockVal);
+    if (isNaN(val) || val < 0) { toast.error("Enter a valid stock amount"); return; }
+    try { await api.patch(`/products/${stockFor.id}/stock`, { stock: val }); toast.success("Stock updated"); setStockFor(null); loadAll(); }
+    catch (err) { toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Failed to update stock"); }
+  };
   const advance = async (o) => { const next = nextStatus(o); if (!next) return; await api.put(`/orders/${o.id}/status`, { status: next }); toast.success(`Marked ${STATUS_LABEL[next]}`); loadAll(); };
   const assignRider = async (orderId, riderId) => { await api.put(`/orders/${orderId}/assign-rider`, { rider_id: riderId }); toast.success("Rider assigned"); loadAll(); };
   const assignCustom = async () => {
@@ -220,6 +228,16 @@ export default function SellerDashboard() {
               </Select>
             </div>
             <Button data-testid="save-custom-rider-btn" onClick={assignCustom} className="w-full rounded-full bg-primary hover:bg-primary/90">Assign rider</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!stockFor} onOpenChange={(v) => !v && setStockFor(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle className="font-heading">Edit stock</DialogTitle><DialogDescription>{stockFor?.name} — update how many units are available.</DialogDescription></DialogHeader>
+          <div className="space-y-3 mt-2">
+            <div><Label>Available stock</Label><Input data-testid="stock-edit-input" type="number" min="0" value={stockVal} onChange={(e) => setStockVal(e.target.value)} className="mt-1.5" placeholder="0" /></div>
+            <Button data-testid="save-stock-btn" onClick={saveStock} className="w-full rounded-full bg-primary hover:bg-primary/90">Save stock</Button>
           </div>
         </DialogContent>
       </Dialog>

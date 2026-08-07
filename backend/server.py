@@ -105,6 +105,15 @@ def match_coords(s):
             return c
     return LAGUNA_CENTER
 
+def match_town(s):
+    if not s:
+        return None
+    sl = s.lower()
+    for name in MUNICIPALITIES:
+        if name.lower() in sl:
+            return name
+    return None
+
 def haversine(a, b):
     lat1, lon1 = a
     lat2, lon2 = b
@@ -285,6 +294,9 @@ class RiderLocation(BaseModel):
     lat: float
     lng: float
 
+class StockUpdate(BaseModel):
+    stock: int = Field(ge=0)
+
 ORDER_STAGES = ["pending", "confirmed", "packed", "rider_assigned", "out_for_delivery", "delivered", "ready_for_pickup", "picked_up", "cancelled"]
 
 # ----------------------- Auth routes -----------------------
@@ -463,6 +475,16 @@ async def delete_product(product_id: str, user: dict = Depends(require_seller)):
         raise HTTPException(status_code=403, detail="Not your product")
     await db.products.update_one({"id": product_id}, {"$set": {"is_deleted": True}})
     return {"ok": True}
+
+@api_router.patch("/products/{product_id}/stock")
+async def update_stock(product_id: str, data: StockUpdate, user: dict = Depends(require_seller)):
+    p = await db.products.find_one({"id": product_id})
+    if not p:
+        raise HTTPException(status_code=404, detail="Product not found")
+    if p["seller_id"] != str(user["_id"]) and user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Not your product")
+    await db.products.update_one({"id": product_id}, {"$set": {"stock": data.stock}})
+    return await db.products.find_one({"id": product_id}, {"_id": 0})
 
 # ----------------------- Riders -----------------------
 @api_router.get("/riders")
@@ -679,7 +701,18 @@ async def assign_rider(order_id: str, data: RiderAssign, user: dict = Depends(re
     await db.orders.update_one({"id": order_id},
         {"$set": {"rider": rider, "status": "rider_assigned", "updated_at": now},
          "$push": {"history": {"status": "rider_assigned", "at": now}}})
-    return await db.orders.find_one({"id": order_id}, {"_id": 0})
+    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if rider.get("rider_user_id"):
+        ruser = await db.users.find_one({"_id": ObjectId(rider["rider_user_id"])})
+        if ruser and ruser.get("email"):
+            addr = order.get("delivery_address") or "the buyer's address"
+            await send_email(ruser["email"], f"New delivery assigned — order #{order_id[:8]}",
+                order_email_html("You've got a new delivery! 🛵",
+                    f"Hi {rider.get('name')}, you've been assigned to deliver order "
+                    f"<b>#{order_id[:8]}</b> to <b>{addr}</b>. Open your Rider portal to view "
+                    f"the route, buyer contact, and start the delivery. "
+                    f"Delivery fee: <b>₱{order.get('shipping_fee', 0):.2f}</b> (100% yours)."))
+    return order
 
 @api_router.put("/orders/{order_id}/assign-custom-rider")
 async def assign_custom_rider(order_id: str, data: CustomRider, user: dict = Depends(require_seller)):
@@ -697,18 +730,23 @@ async def assign_custom_rider(order_id: str, data: CustomRider, user: dict = Dep
 @api_router.post("/shipping-quote")
 async def shipping_quote(data: ShippingQuoteInput):
     if data.fulfillment_type == "pickup":
-        return {"shipping_fee": 0.0, "distance_km": 0}
+        return {"shipping_fee": 0.0, "distance_km": 0, "local_rate": False}
     pickup = LAGUNA_CENTER
+    seller_town = None
     if data.product_id:
         p = await db.products.find_one({"id": data.product_id})
         if p:
             pickup = match_coords(p.get("location"))
+            seller_town = match_town(p.get("location"))
     if data.delivery_lat is not None and data.delivery_lng is not None:
         dropoff = (data.delivery_lat, data.delivery_lng)
     else:
         dropoff = match_coords(data.delivery_address)
+    buyer_town = match_town(data.delivery_address)
     dist = haversine(pickup, dropoff)
-    return {"shipping_fee": fee_from_distance(dist), "distance_km": round(dist, 1)}
+    local = bool(seller_town and buyer_town and seller_town == buyer_town)
+    fee = LOCAL_RATE if local else fee_from_distance(dist)
+    return {"shipping_fee": fee, "distance_km": round(dist, 1), "local_rate": local}
 
 @api_router.get("/rider/orders")
 async def rider_orders(user: dict = Depends(require_rider)):

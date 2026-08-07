@@ -1,0 +1,46 @@
+{
+  "summary": "Iteration 10 (Municipality dropdown + same-town ₱30 discount + seller stock edit + rate-from-orders + rider assign email). Ran 10 pytest cases + Playwright verification on FE. 9/10 backend PASS. Found TWO CRITICAL BUGS: (B1) /api/checkout does NOT apply the same-town LOCAL_RATE — it calls fee_from_distance() directly instead of shipping_fee_for(pickup_town, buyer_town, ...). Result: /api/shipping-quote correctly returns ₱30 for same town (verified curl+pytest), BUT the actual persisted order.shipping_fee is the distance rate (e.g. ₱49). Buyer sees ₱30 in the checkout preview via /shipping-quote polling but gets charged the higher fee. (F1) SellerDashboard.jsx /seller → 'My Products' tab has NO Edit-stock trigger button on the product cards — only the 'Remove' button is rendered. The dialog (data-testid=stock-edit-input, save-stock-btn), saveStock() handler, and stockFor state all exist but setStockFor(p) is never called anywhere in the file. data-testid=edit-stock-{productId} is completely missing. Playwright confirms 0 edit-stock buttons and 0 'Edit stock' text on the page (screenshot attached). Other flows verified OK: municipality-select renders 12 towns; address-field and checkout-shipping testids present; rate-item / review-comment / submit-review-btn selectors present on Orders page; PATCH /products/{id}/stock works (200); POST /products/{id}/reviews works after delivered; PUT /orders/{id}/assign-rider returns 200, status → rider_assigned, no 500 from email side-effect; GET /rider/earnings returns proper shape with fees_earned ≥ 0.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/checkout", "issue": "Same-town LOCAL_RATE (₱30) is NEVER applied to saved orders. server.py:519 calls fee_from_distance(haversine(pickup, dropoff)) unconditionally. Must call shipping_fee_for(match_town(first.get('location')), match_town(data.delivery_address), pickup, dropoff). Verified: /shipping-quote returns ₱30 same-town but a checkout with buyer town == seller town persists ₱49 shipping_fee. This breaks the entire feature — buyers see ₱30 preview then get charged distance rate.", "priority": "CRITICAL"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "SellerDashboard.jsx (My Products tab)", "issue": "Edit-stock trigger button is missing on every product card. The state (stockFor), handler (saveStock), and Dialog (with stock-edit-input, save-stock-btn) exist but no clickable button calls setStockFor(p). Add e.g. <button data-testid={`edit-stock-${p.id}`} onClick={() => { setStockFor(p); setStockVal(String(p.stock)); }}>Edit stock</button> next to the Remove button around line 307.", "selector": "data-testid=edit-stock-{productId}", "priority": "CRITICAL"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Market page (leaflet map)", "issues": ["Uncaught runtime error observed twice: 'Cannot read properties of undefined (reading _leaflet_pos)' from leaflet.js._getMapPanePos / e.invalidateSize. Non-blocking (products still render) but the error overlay appears in dev builds and pollutes the console."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration10.py",
+    "/app/test_reports/pytest/iter10.xml"
+  ],
+  "action_items": [
+    "BACKEND: server.py /checkout (line ~511-519) — replace `shipping_fee = fee_from_distance(haversine(pickup, dropoff))` with `shipping_fee = shipping_fee_for(match_town((first or {}).get('location')), match_town(data.delivery_address), pickup, dropoff)`. Re-run test_iteration10.py — TestShippingQuote::test_checkout_applies_local_rate should turn green.",
+    "FRONTEND: SellerDashboard.jsx — add an 'Edit stock' button (data-testid=`edit-stock-${p.id}`) next to the Remove button on each product card (~line 307) that calls setStockFor(p) and setStockVal(String(p.stock)).",
+    "OPTIONAL: Guard leaflet invalidateSize calls in map components with `if (map._container)` to avoid the _leaflet_pos undefined error when the map is torn down."
+  ],
+  "critical_code_review_comments": [
+    "server.py has TWO redundant shipping-fee code paths (checkout inlines fee_from_distance; shipping-quote uses shipping_fee_for). This is exactly why the discount silently regressed. Consolidate: /checkout must call shipping_fee_for so preview and persisted values can never diverge.",
+    "server.py is now 930 lines. Split into routers/{auth,products,orders,checkout,shipping,rider,reviews,gcash} — the bug above is a direct consequence of one giant file being hard to review.",
+    "SellerDashboard.jsx: the 'Edit stock' dialog is dead code without a trigger — this indicates a merge/refactor that lost a JSX line. Add a small render test / snapshot for the My Products card to catch this.",
+    "Frontend /api/shipping-quote is called during checkout to show ₱30, but the server's /checkout computes a different fee — introduce a single server-side authoritative calc and echo it back in the checkout preview via /shipping-quote using the SAME function (shipping_fee_for). Currently both call it but /checkout diverges."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration10.py (new)"
+  ],
+  "success_rate": {
+    "backend": "9/10 (90%) — 1 critical failure on checkout same-town rate",
+    "frontend": "4/5 flows — Edit stock button entirely missing"
+  },
+  "test_credentials": "mang.kanor@laguna.ph/farmer123, aling.nena@laguna.ph/buyer123, rider.pedro@laguna.ph/rider123 — all working.",
+  "seed_data_creation": "Created several TEST_ delivery COD orders for Kanor products (advanced to delivered) to exercise the review flow. One 'TEST_iter10 fresh & delicious' 5-star review was posted against Kanor's Calamba product (id kept in fixture). One rider_assigned order created via assign-rider test.",
+  "retest_needed": true,
+  "main_agent_can_self_test": false,
+  "context_for_next_testing_agent": "After main agent fixes: (a) checkout shipping_fee_for wiring, and (b) SellerDashboard edit-stock button — rerun `REACT_APP_BACKEND_URL=https://farm-direct-laguna.preview.emergentagent.com python -m pytest /app/backend/tests/test_iteration10.py -v`. Then in Playwright: seller login → /seller → My Products tab → click edit-stock-<id> → fill stock-edit-input → click save-stock-btn → assert product card shows the new 'X left'. Also verify Checkout: select a Kanor Calamba product, choose Calamba municipality, checkout-shipping should be ₱30 AND after 'Pay now' the resulting order.shipping_fee == 30. The leaflet _leaflet_pos runtime error on /market is a pre-existing minor issue and not caused by this iteration's changes.",
+  "rca of the issue": "B1 (checkout same-town): /checkout was written before shipping_fee_for existed and was never migrated. The shipping-quote endpoint was updated correctly but /checkout still uses `fee_from_distance(haversine(pickup, dropoff))` directly (server.py line 519). Fix: swap in shipping_fee_for(match_town(first.get('location')), match_town(data.delivery_address), pickup, dropoff). F1 (missing edit-stock button): the Dialog + saveStock + setStockFor state all exist in SellerDashboard.jsx but no JSX renders a button that invokes setStockFor(p). Likely a refactor / merge lost the button. Add a testid'd button on each product card row alongside the Remove button."
+}

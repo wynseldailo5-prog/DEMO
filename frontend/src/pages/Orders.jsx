@@ -5,7 +5,12 @@ import { useAuth } from "@/context/AuthContext";
 import OrderTracker from "@/components/OrderTracker";
 import DeliveryMap from "@/components/DeliveryMap";
 import { etaFrom, matchCoords } from "@/lib/laguna";
-import { Package, MapPin, Phone, Bike, ChevronDown, Store, X, Wallet, Clock } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import StarRating from "@/components/StarRating";
+import { Package, MapPin, Phone, Bike, ChevronDown, Store, X, Wallet, Clock, Star } from "lucide-react";
 import { toast } from "sonner";
 
 const FALLBACK = "https://images.unsplash.com/photo-1687199129802-3e4cc27baac0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDJ8MHwxfHNlYXJjaHwxfHxmcmVzaCUyMHZlZ2V0YWJsZXMlMjBtYXJrZXQlMjBzdGFsbHxlbnwwfHx8fDE3ODU1NTQzMDd8MA&ixlib=rb-4.1.0&q=85";
@@ -16,9 +21,21 @@ export default function Orders() {
   const [orders, setOrders] = useState([]);
   const [open, setOpen] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [reviewFor, setReviewFor] = useState(null);
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState("");
 
   const load = () => api.get("/orders").then((r) => setOrders(r.data)).finally(() => setLoading(false));
   useEffect(() => { if (user) load(); }, [user]);
+
+  const submitReview = async () => {
+    if (!rating) { toast.error("Please pick a star rating."); return; }
+    try {
+      await api.post(`/products/${reviewFor.product_id}/reviews`, { rating, comment });
+      toast.success("Thanks for your review!");
+      setReviewFor(null); setRating(0); setComment("");
+    } catch (err) { toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Could not submit review"); }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -89,7 +106,13 @@ export default function Orders() {
                     {o.items.map((i, idx) => (
                       <div key={idx} className="flex items-center gap-3">
                         <img src={fileUrl(i.image_url) || FALLBACK} alt={i.name} className="h-12 w-12 rounded-lg object-cover" />
-                        <div className="flex-1 min-w-0"><div className="text-sm font-medium truncate">{i.name}</div><div className="text-xs text-muted-foreground">×{i.quantity}</div></div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium truncate">{i.name}</div>
+                          <div className="text-xs text-muted-foreground">×{i.quantity}</div>
+                          {["delivered", "picked_up"].includes(o.status) && (
+                            <button data-testid={`rate-item-${i.product_id}`} onClick={() => { setReviewFor(i); setRating(0); setComment(""); }} className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"><Star size={12} /> Rate this product</button>
+                          )}
+                        </div>
                         <div className="text-sm font-semibold">{peso(i.price * i.quantity)}</div>
                       </div>
                     ))}
@@ -125,6 +148,17 @@ export default function Orders() {
           ))}
         </div>
       )}
+
+      <Dialog open={!!reviewFor} onOpenChange={(v) => !v && setReviewFor(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle className="font-heading">Rate {reviewFor?.name}</DialogTitle><DialogDescription>Share how your farm-fresh goods were.</DialogDescription></DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div><Label className="text-sm text-muted-foreground">Your rating</Label><div className="mt-1.5"><StarRating value={rating} size={28} showEmpty={false} onRate={setRating} /></div></div>
+            <div><Label className="text-sm text-muted-foreground">Comment (optional)</Label><Textarea data-testid="review-comment" value={comment} onChange={(e) => setComment(e.target.value)} className="mt-1.5" placeholder="Fresh and delicious!" /></div>
+            <Button data-testid="submit-review-btn" onClick={submitReview} className="w-full rounded-full bg-accent hover:bg-accent/90 text-accent-foreground">Submit review</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
