@@ -511,12 +511,13 @@ async def checkout(data: CheckoutInput, request: Request, user: dict = Depends(g
     shipping_fee = 0.0
     if data.fulfillment_type == "delivery":
         first = await db.products.find_one({"id": items[0]["product_id"]})
-        pickup = match_coords(first.get("location") if first else None)
+        seller_loc = first.get("location") if first else None
+        pickup = match_coords(seller_loc)
         if data.delivery_lat is not None and data.delivery_lng is not None:
             dropoff = (data.delivery_lat, data.delivery_lng)
         else:
             dropoff = match_coords(data.delivery_address)
-        shipping_fee = fee_from_distance(haversine(pickup, dropoff))
+        shipping_fee = shipping_fee_for(match_town(seller_loc), match_town(data.delivery_address), pickup, dropoff)
     total = round(subtotal + shipping_fee, 2)
     order_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()

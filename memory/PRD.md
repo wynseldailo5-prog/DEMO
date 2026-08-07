@@ -54,8 +54,19 @@ Build a Shopee-style marketplace for farmers (sellers) and buyers within Laguna 
 - Email alerts (Resend managed): buyer emailed on out_for_delivery ("on the way"), arriving (<1.5km, once), and delivered. send_email/order_email_html; EMERGENT_EMAIL_KEY in .env. [done]
 - Hardened Orders live-poll (deps [open], self-clears on terminal status). Tested iteration_9: 4/4 frontend flows, backend chain verified, emails send with no errors.
 
+## Implemented (2026-06, iteration 10 — Municipalities, same-town rate, stock edit, rate-from-orders, rider email)
+- Fixed a P0 startup blocker: server.py had a corrupted duplicated tail block (crash on boot) — removed. [done]
+- PayMongo TEST key active: swapped sk_live_ → sk_test_RH3PZ8... in backend/.env so GCash auto-verify runs in sandbox (no real charges). [done]
+- Checkout Laguna municipality DROPDOWN (12 towns) + house/barangay detail + optional map pin; composed address; municipality required. [done]
+- Same-town shipping discount: flat LOCAL_RATE ₱30 when seller town == buyer town, else distance-based. Wired into BOTH /api/shipping-quote (returns local_rate) AND /api/checkout via shipping_fee_for() — preview & persisted fee now match (verified: Calamba same-town order persists ₱30). [done]
+- Shipping fee credited 100% to the assigned rider (GET /api/rider/earnings sums delivered orders' shipping_fee). [done]
+- Seller stock edit: PATCH /api/products/{id}/stock (seller-owned, StockUpdate ge=0) + 'Edit stock' button/dialog in Seller Dashboard My Products tab. [done]
+- Buyers rate/review delivered products directly from Orders page (per-item 'Rate this product' → StarRating + comment dialog → POST /products/{id}/reviews). [done]
+- Rider email on assignment: PUT /api/orders/{id}/assign-rider looks up the rider's user email (via rider_user_id) and sends a Resend email with order #, address, and delivery fee. Custom/temp riders (no account) skip email. [done]
+- Tested iteration_10: same-town persisted fee ₱30 (curl), stock PATCH (curl), reviews POST OK, assign-rider 200 + no 500 from email, rider earnings shape OK. Frontend compiles clean.
+
 ## Pending on user input
-- PayMongo GCash auto-verify code is complete but DORMANT — user must paste a real PAYMONGO_SECRET_KEY (sk_test_...) + webhook secret to activate; GCash stays manual until then.
+- PayMongo webhook secret (PAYMONGO_WEBHOOK_SECRET) still empty — auto-verify checkout works but signed webhook confirmation is inactive until user registers the webhook {backend}/api/webhook/paymongo and pastes its secret.
 
 ## Implemented (2026-06, iteration 6 — Rider role, live tracking, accurate address, QR warning)
 - Accurate checkout address: MapPicker reverse-geocodes pin/location (Nominatim) and auto-fills the delivery address; "Use my location" via browser geolocation. [done]

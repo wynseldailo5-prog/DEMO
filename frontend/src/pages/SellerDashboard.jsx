@@ -304,7 +304,10 @@ export default function SellerDashboard() {
                     <div className="font-heading font-bold text-sm line-clamp-1">{p.name}</div>
                     <div className="mt-0.5"><StarRating value={p.rating_avg || 0} count={p.rating_count || 0} size={12} showEmpty={false} /></div>
                     <div className="text-xs text-muted-foreground">{peso(p.price)}/{p.unit} · {p.stock} left</div>
-                    <button data-testid={`delete-product-${p.id}`} onClick={() => del(p.id)} className="mt-2 text-xs text-destructive flex items-center gap-1 hover:underline"><Trash2 size={12} /> Remove</button>
+                    <div className="mt-2 flex items-center gap-3">
+                      <button data-testid={`edit-stock-${p.id}`} onClick={() => { setStockFor(p); setStockVal(String(p.stock ?? 0)); }} className="text-xs text-primary flex items-center gap-1 hover:underline"><Package size={12} /> Edit stock</button>
+                      <button data-testid={`delete-product-${p.id}`} onClick={() => del(p.id)} className="text-xs text-destructive flex items-center gap-1 hover:underline"><Trash2 size={12} /> Remove</button>
+                    </div>
                   </div>
                 </div>
               ))}
