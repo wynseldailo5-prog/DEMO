@@ -118,6 +118,13 @@ def fee_from_distance(km):
     fee = 49 + (6 * km if km <= 5 else 30 + 5 * (km - 5))
     return float(round(fee))
 
+LOCAL_RATE = 30.0
+
+def shipping_fee_for(pickup_town, buyer_town, pickup, dropoff):
+    if pickup_town and buyer_town and pickup_town == buyer_town:
+        return LOCAL_RATE  # same municipality — cheaper local rate
+    return fee_from_distance(haversine(pickup, dropoff))
+
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
 
