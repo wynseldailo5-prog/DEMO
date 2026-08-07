@@ -14,6 +14,9 @@ Build a Shopee-style marketplace for farmers (sellers) and buyers within Laguna 
 - **Seller (Farmer)**: posts goods with photos, manages incoming orders, advances delivery status, assigns riders.
 - **Admin/Owner** (wynseldailo5@gmail.com): sees all orders.
 
+## Admin/Owner (2026-06 — view-only)
+- Admin = oversight only. Lands on /orders (all orders across marketplace, read-only). Cannot manage/act on orders or products. Backend enforces via require_seller_only on all write endpoints; frontend hides Sell link, seller dashboard, and action buttons for admin.
+
 ## Core Requirements (static)
 - Email/password auth, roles buyer/seller/admin.
 - Product CRUD with image upload.

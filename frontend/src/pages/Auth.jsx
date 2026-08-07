@@ -26,7 +26,7 @@ export default function Auth({ mode }) {
       if (isLogin) {
         const u = await login(form.email, form.password);
         toast.success(`Welcome back, ${u.name}!`);
-        navigate(u.role === "seller" ? "/seller" : u.role === "rider" ? "/rider" : "/market");
+        navigate(u.role === "seller" ? "/seller" : u.role === "rider" ? "/rider" : u.role === "admin" ? "/orders" : "/market");
       } else {
         const u = await register({ ...form, role });
         toast.success("Account created!");

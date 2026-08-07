@@ -54,7 +54,7 @@ export default function SellerDashboard() {
 
   useEffect(() => {
     if (loading) return;
-    if (!user || (user.role !== "seller" && user.role !== "admin")) { navigate("/"); return; }
+    if (!user || user.role !== "seller") { navigate(user && user.role === "admin" ? "/orders" : "/"); return; }
     loadAll(); /* eslint-disable-next-line */
   }, [user, loading]);
 

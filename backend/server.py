@@ -210,6 +210,11 @@ async def require_seller(user: dict = Depends(get_current_user)) -> dict:
         raise HTTPException(status_code=403, detail="Seller access required")
     return user
 
+async def require_seller_only(user: dict = Depends(get_current_user)) -> dict:
+    if user.get("role") != "seller":
+        raise HTTPException(status_code=403, detail="Only sellers can perform this action. Admins have view-only access.")
+    return user
+
 async def require_rider(user: dict = Depends(get_current_user)) -> dict:
     if user.get("role") != "rider":
         raise HTTPException(status_code=403, detail="Rider access required")
@@ -446,7 +451,7 @@ async def seller_earnings(user: dict = Depends(require_seller)):
     return {"breakdown": breakdown, "total": total, "pending": round(pending, 2), "orders": rows}
 
 @api_router.post("/products")
-async def create_product(data: ProductInput, user: dict = Depends(require_seller)):
+async def create_product(data: ProductInput, user: dict = Depends(require_seller_only)):
     doc = data.model_dump()
     doc.update({"id": str(uuid.uuid4()), "seller_id": str(user["_id"]),
                 "seller_name": user.get("farm_name") or user.get("name"),
@@ -456,7 +461,7 @@ async def create_product(data: ProductInput, user: dict = Depends(require_seller
     return doc
 
 @api_router.put("/products/{product_id}")
-async def update_product(product_id: str, data: ProductInput, user: dict = Depends(require_seller)):
+async def update_product(product_id: str, data: ProductInput, user: dict = Depends(require_seller_only)):
     p = await db.products.find_one({"id": product_id})
     if not p:
         raise HTTPException(status_code=404, detail="Product not found")
@@ -467,7 +472,7 @@ async def update_product(product_id: str, data: ProductInput, user: dict = Depen
     return updated
 
 @api_router.delete("/products/{product_id}")
-async def delete_product(product_id: str, user: dict = Depends(require_seller)):
+async def delete_product(product_id: str, user: dict = Depends(require_seller_only)):
     p = await db.products.find_one({"id": product_id})
     if not p:
         raise HTTPException(status_code=404, detail="Product not found")
@@ -477,7 +482,7 @@ async def delete_product(product_id: str, user: dict = Depends(require_seller)):
     return {"ok": True}
 
 @api_router.patch("/products/{product_id}/stock")
-async def update_stock(product_id: str, data: StockUpdate, user: dict = Depends(require_seller)):
+async def update_stock(product_id: str, data: StockUpdate, user: dict = Depends(require_seller_only)):
     p = await db.products.find_one({"id": product_id})
     if not p:
         raise HTTPException(status_code=404, detail="Product not found")
@@ -681,7 +686,7 @@ async def get_order(order_id: str, user: dict = Depends(get_current_user)):
     return o
 
 @api_router.put("/orders/{order_id}/status")
-async def update_status(order_id: str, data: StatusUpdate, user: dict = Depends(require_seller)):
+async def update_status(order_id: str, data: StatusUpdate, user: dict = Depends(require_seller_only)):
     if data.status not in ORDER_STAGES:
         raise HTTPException(status_code=400, detail="Invalid status")
     o = await db.orders.find_one({"id": order_id})
@@ -694,7 +699,7 @@ async def update_status(order_id: str, data: StatusUpdate, user: dict = Depends(
     return await db.orders.find_one({"id": order_id}, {"_id": 0})
 
 @api_router.put("/orders/{order_id}/assign-rider")
-async def assign_rider(order_id: str, data: RiderAssign, user: dict = Depends(require_seller)):
+async def assign_rider(order_id: str, data: RiderAssign, user: dict = Depends(require_seller_only)):
     rider = await db.riders.find_one({"id": data.rider_id}, {"_id": 0})
     if not rider:
         raise HTTPException(status_code=404, detail="Rider not found")
@@ -815,7 +820,7 @@ async def cancel_order(order_id: str, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Order not found")
     uid = str(user["_id"])
     is_owner = o["buyer_id"] == uid
-    is_seller = user.get("role") in ("seller", "admin") and (uid in o.get("seller_ids", []) or user.get("role") == "admin")
+    is_seller = user.get("role") == "seller" and uid in o.get("seller_ids", [])
     if not (is_owner or is_seller):
         raise HTTPException(status_code=403, detail="Not allowed to cancel this order")
     if o.get("payment_status") == "paid":
@@ -830,7 +835,7 @@ async def cancel_order(order_id: str, user: dict = Depends(get_current_user)):
     return await db.orders.find_one({"id": order_id}, {"_id": 0})
 
 @api_router.put("/seller/gcash")
-async def update_gcash(data: GcashProfile, user: dict = Depends(require_seller)):
+async def update_gcash(data: GcashProfile, user: dict = Depends(require_seller_only)):
     await db.users.update_one({"_id": user["_id"]},
         {"$set": {"gcash_number": data.gcash_number, "gcash_name": data.gcash_name, "gcash_qr_url": data.gcash_qr_url}})
     u = await db.users.find_one({"_id": user["_id"]})
@@ -850,7 +855,7 @@ async def submit_gcash_ref(order_id: str, data: GcashReference, user: dict = Dep
     return await db.orders.find_one({"id": order_id}, {"_id": 0})
 
 @api_router.put("/orders/{order_id}/verify-payment")
-async def verify_payment(order_id: str, user: dict = Depends(require_seller)):
+async def verify_payment(order_id: str, user: dict = Depends(require_seller_only)):
     o = await db.orders.find_one({"id": order_id})
     if not o:
         raise HTTPException(status_code=404, detail="Order not found")

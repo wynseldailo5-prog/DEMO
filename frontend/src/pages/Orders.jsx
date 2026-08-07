@@ -56,14 +56,17 @@ export default function Orders() {
     catch (err) { toast.error(formatApiErrorDetail(err.response?.data?.detail) || "Cannot cancel"); }
   };
 
-  const canCancel = (o) => o.payment_status !== "paid" && !["delivered", "picked_up", "cancelled"].includes(o.status);
+  const isAdmin = user?.role === "admin";
+  const canCancel = (o) => !isAdmin && o.payment_status !== "paid" && !["delivered", "picked_up", "cancelled"].includes(o.status);
 
   if (!user) return <div className="max-w-3xl mx-auto px-4 py-24 text-center"><p className="text-muted-foreground">Please <Link to="/login" className="text-primary font-semibold">sign in</Link> to view orders.</p></div>;
   if (loading) return <div className="max-w-3xl mx-auto px-4 py-24 text-center text-muted-foreground">Loading orders…</div>;
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
-      <h1 className="font-heading font-black text-3xl tracking-tight mb-6">My Orders</h1>
+      <h1 className="font-heading font-black text-3xl tracking-tight mb-2">{isAdmin ? "All Orders" : "My Orders"}</h1>
+      {isAdmin && <p className="text-sm text-muted-foreground mb-6" data-testid="admin-overview-note">Admin overview — you can monitor every order across the marketplace. Sellers manage fulfilment; this view is read-only.</p>}
+      {!isAdmin && <div className="mb-6" />}
       {orders.length === 0 ? (
         <div className="text-center py-20 text-muted-foreground"><Package className="mx-auto mb-3 opacity-50" /><p>No orders yet.</p></div>
       ) : (
@@ -109,7 +112,7 @@ export default function Orders() {
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-medium truncate">{i.name}</div>
                           <div className="text-xs text-muted-foreground">×{i.quantity}</div>
-                          {["delivered", "picked_up"].includes(o.status) && (
+                          {!isAdmin && ["delivered", "picked_up"].includes(o.status) && (
                             <button data-testid={`rate-item-${i.product_id}`} onClick={() => { setReviewFor(i); setRating(0); setComment(""); }} className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline"><Star size={12} /> Rate this product</button>
                           )}
                         </div>
@@ -131,7 +134,7 @@ export default function Orders() {
                     {o.rider && <div className="flex items-center gap-2"><Bike size={15} className="text-primary" /><span>{o.rider.name}{o.rider.vehicle && o.rider.vehicle !== "—" ? ` · ${o.rider.vehicle}` : ""}{o.rider.phone ? ` · ${o.rider.phone}` : ""}{o.rider.custom ? " (temporary)" : ""}</span></div>}
                   </div>
 
-                  {o.payment_method === "gcash" && o.payment_status !== "paid" && (
+                  {!isAdmin && o.payment_method === "gcash" && o.payment_status !== "paid" && (
                     <Link to={`/gcash-pay/${o.id}`} data-testid={`gcash-pay-link-${o.id}`} className="inline-flex items-center gap-1.5 text-sm font-medium text-[#0079FF] hover:underline">
                       <Wallet size={15} /> {o.payment_status === "gcash_submitted" ? "View GCash payment (awaiting seller)" : "Complete GCash payment"}
                     </Link>
